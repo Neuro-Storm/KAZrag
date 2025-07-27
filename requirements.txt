@@ -1,0 +1,15 @@
+
+fastapi>=0.100.0,<0.104.0
+uvicorn[standard]
+langchain>=0.2.0
+langchain-huggingface
+langchain-qdrant>=0.1.0
+langchain-community
+langchain-core
+qdrant-client>=1.9.0
+torch
+transformers
+jinja2
+python-multipart
+scipy
+mineru # Добавлено

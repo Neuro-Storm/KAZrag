@@ -1,0 +1,51 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Поиск по документам</title>
+    <link rel="stylesheet" href="https://unpkg.com/simpledotcss/simple.min.css">
+</head>
+<body>
+    <header>
+        <h1>Поиск по документам</h1>
+        <nav><a href="/">Поиск</a> <a href="/settings">Настройки</a></nav>
+    </header>
+    <main>
+        <form action="/" method="post">
+            <div class="grid">
+                <label for="collection">Искать в коллекции
+                    <select id="collection" name="collection" required>
+                        <option value="" disabled selected>Выберите коллекцию</option>
+                        {% for c in collections %}
+                            <option value="{{ c }}" {% if c == selected_collection %}selected{% endif %}>{{ c }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label for="search_device">Устройство для поиска
+                    <select id="search_device" name="search_device">
+                        <option value="cpu" {% if selected_search_device == 'cpu' %}selected{% endif %}>CPU</option>
+                        <option value="cuda" {% if selected_search_device == 'cuda' %}selected{% endif %}>GPU (если доступна)</option>
+                    </select>
+                </label>
+            </div>
+            <label for="query">Поисковый запрос:</label>
+            <input type="text" name="query" id="query" placeholder="Введите ваш запрос..." value="{{ query or '' }}" required>
+            <label for="k">Количество результатов:</label>
+            <input type="number" id="k" name="k" min="1" max="50" value="{{ k or 5 }}">
+            <button type="submit">Найти</button>
+        </form>
+        {% if results %}
+            <h2>Результаты поиска ({{ results|length }}):</h2>
+            {% for doc, score in results %}
+                <article>
+                    <header><b>Источник:</b> {{ doc.metadata.get('source', 'N/A') }} | <b>Сходство:</b> <mark>{{ '%.4f'|format(score) }}</mark></header>
+                    <p>{{ doc.page_content }}</p>
+                </article>
+            {% endfor %}
+        {% elif request.method == 'POST' %}
+             <p>По вашему запросу ничего не найдено в коллекции '{{ selected_collection }}'.</p>
+        {% endif %}
+    </main>
+</body>
+</html>

@@ -1,0 +1,27 @@
+{
+    "folder_path": "./data_to_index",
+    "collection_name": "final1",
+    "current_hf_model": "Qwen/Qwen3-Embedding-0.6B",
+    "hf_model_history": [
+        "sentence-transformers/all-MiniLM-L6-v2",
+        "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
+        "Qwen/Qwen3-Embedding-4B",
+        "Qwen/Qwen3-Embedding-0.6B"
+    ],
+    "chunk_size": 2000,
+    "chunk_overlap": 100,
+    "qdrant_url": "http://localhost:6333",
+    "device": "cuda",
+    "use_dense_vectors": true,
+    "is_indexed": true,
+    "mineru_input_pdf_dir": "./pdfs_to_process",
+    "mineru_output_md_dir": "./data_to_index",
+    "mineru_enable_formula_parsing": true,
+    "mineru_enable_table_parsing": true,
+    "mineru_model_source": "huggingface",
+    "mineru_models_dir": "",
+    "mineru_backend": "pipeline",
+    "mineru_method": "auto",
+    "mineru_lang": "east_slavic",
+    "mineru_sglang_url": ""
+}
