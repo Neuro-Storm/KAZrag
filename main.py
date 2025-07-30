@@ -1,6 +1,7 @@
 
 import os
 import json
+import time
 import traceback
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
@@ -19,6 +20,30 @@ from qdrant_client import QdrantClient
 _dense_embedder = None
 _dense_embedder_model = None
 _dense_embedder_device = None
+
+# --- Кэш для списка коллекций ---
+_cached_collections = None
+_cached_collections_time = 0
+COLLECTIONS_CACHE_TTL = 300  # 5 минут
+
+def refresh_collections_cache():
+    """Обновляет кэш списка коллекций"""
+    global _cached_collections, _cached_collections_time
+    client = get_qdrant_client()
+    try:
+        _cached_collections = [c.name for c in client.get_collections().collections]
+        _cached_collections_time = time.time()
+    except Exception:
+        _cached_collections = []
+    return _cached_collections
+
+def get_cached_collections():
+    """Возвращает кэшированный список коллекций"""
+    global _cached_collections, _cached_collections_time
+    if (_cached_collections is None or
+        (time.time() - _cached_collections_time) > COLLECTIONS_CACHE_TTL):
+        return refresh_collections_cache()
+    return _cached_collections
 
 # Импорт функции обработки PDF из отдельного модуля
 from pdf_to_md_chunker import process_pdfs_and_chunk
@@ -180,11 +205,7 @@ def run_indexing_logic():
 # Эндпоинты FastAPI для веб-интерфейса
 @app.get("/", response_class=HTMLResponse)
 async def get_search_page(request: Request):
-    client = get_qdrant_client()
-    try:
-        collections = [c.name for c in client.get_collections().collections]
-    except Exception:
-        collections = []
+    collections = get_cached_collections()
     return templates.TemplateResponse("index.html", {
         "request": request, "results": [], "collections": collections
     })
@@ -235,6 +256,7 @@ async def delete_collection(request: Request, collection_name: str = Form(...)):
              status_msg = "error_no_collection_selected"
         else:
             client.delete_collection(collection_name)
+            refresh_collections_cache()  # Обновляем кэш после удаления
             status_msg = f"deleted_{collection_name}"
     except Exception as e:
         print(f"Ошибка при удалении коллекции '{collection_name}': {e}")
@@ -244,11 +266,7 @@ async def delete_collection(request: Request, collection_name: str = Form(...)):
 @app.get("/settings", response_class=HTMLResponse)
 async def get_settings_page(request: Request, status: str = None):
     config = load_config()
-    client = get_qdrant_client()
-    try:
-        collections = [c.name for c in client.get_collections().collections]
-    except Exception:
-        collections = []
+    collections = get_cached_collections()
     return templates.TemplateResponse("settings.html", {
         "request": request,
         "config": config,
@@ -347,6 +365,8 @@ async def update_settings(
 @app.post("/run-indexing", response_class=RedirectResponse)
 async def run_indexing():
     success, status = run_indexing_logic()
+    if success and "successfully" in status:
+        refresh_collections_cache()  # Обновляем кэш после индексации
     return RedirectResponse(url=f"/settings?status={status}", status_code=303)
 
 # Эндпоинт для обработки PDF через MinerU
