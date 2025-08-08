@@ -1,7 +1,7 @@
 {
     "folder_path": "./data_to_index",
-    "collection_name": "final1",
-    "current_hf_model": "Qwen/Qwen3-Embedding-0.6B",
+    "collection_name": "ESKD4000",
+    "current_hf_model": "Qwen/Qwen3-Embedding-4B",
     "hf_model_history": [
         "sentence-transformers/all-MiniLM-L6-v2",
         "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
@@ -11,9 +11,10 @@
     "chunk_size": 2000,
     "chunk_overlap": 100,
     "qdrant_url": "http://localhost:6333",
-    "device": "cuda",
+    "device": "cpu",
     "use_dense_vectors": true,
-    "is_indexed": true,
+    "is_indexed": false,
+    "batch_size": 1,
     "mineru_input_pdf_dir": "./pdfs_to_process",
     "mineru_output_md_dir": "./data_to_index",
     "mineru_enable_formula_parsing": true,
@@ -23,5 +24,7 @@
     "mineru_backend": "pipeline",
     "mineru_method": "auto",
     "mineru_lang": "east_slavic",
-    "mineru_sglang_url": ""
+    "mineru_sglang_url": "",
+    "embedding_batch_size": 1,
+    "indexing_batch_size": 1
 }

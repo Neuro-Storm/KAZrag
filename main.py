@@ -77,6 +77,8 @@ def load_config() -> Dict[str, Any]:
             "mineru_method": "auto",
             "mineru_lang": "east_slavic",
             "mineru_sglang_url": "",
+            "embedding_batch_size": 32,
+            "indexing_batch_size": 50,
         }
         save_config(default_cfg)
         return default_cfg
@@ -108,17 +110,24 @@ def get_qdrant_client() -> QdrantClient:
 def get_dense_embedder(config, device=None):
     global _dense_embedder, _dense_embedder_model, _dense_embedder_device
     model_name = config["current_hf_model"]
+    batch_size = config.get("embedding_batch_size", 32)
     if device is None:
         device = get_device(config["device"])
     # Если модель или устройство изменились, сбрасываем кэш
     if (
         _dense_embedder is None or
         _dense_embedder_model != model_name or
-        _dense_embedder_device != device
+        _dense_embedder_device != device or
+        getattr(_dense_embedder, "_batch_size", None) != batch_size
     ):
-        _dense_embedder = HuggingFaceEmbeddings(model_name=model_name, model_kwargs={"device": device})
+        _dense_embedder = HuggingFaceEmbeddings(
+            model_name=model_name,
+            model_kwargs={"device": device},
+            encode_kwargs={"batch_size": batch_size}
+        )
         _dense_embedder_model = model_name
         _dense_embedder_device = device
+        _dense_embedder._batch_size = batch_size  # Для отслеживания
     return _dense_embedder
 
 # Основная логика индексации документов
@@ -135,7 +144,23 @@ def run_indexing_logic():
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=config["chunk_size"], chunk_overlap=config["chunk_overlap"]
     )
-    docs = []
+    
+    # Загрузить модель эмбеддинга один раз
+    device = get_device(config['device'])
+    dense_embedder = get_dense_embedder(config, device)
+    
+    # Параметры для пакетной обработки
+    batch_size = config.get("indexing_batch_size", 50)  # Получаем из конфигурации, по умолчанию 50
+
+
+    
+    
+    
+    docs_batch = []
+    collection_created = False
+    docs_processed = 0
+    
+    # Обрабатываем .txt файлы
     for filepath in folder_path.rglob("*.txt"):
         try:
             loaded_docs = TextLoader(str(filepath), encoding="utf-8").load()
@@ -144,60 +169,134 @@ def run_indexing_logic():
                 # Получение относительного пути файла от корневой папки
                 abs_filepath = filepath.resolve()
                 relative_source_path = abs_filepath.relative_to(folder_path_resolved)
-                source_str = str(relative_source_path)
             except ValueError:
                 # Если файл не в корневой папке, используем полный путь
                 print(f"Предупреждение: Файл {filepath} не находится внутри {folder_path_resolved}. Используется полный путь.")
-                source_str = str(filepath)
-
-            # ---
-            docs.extend(chunks)
+                relative_source_path = abs_filepath
+            
+            # Добавляем метаданные к чанкам
+            for chunk in chunks:
+                chunk.metadata["source"] = str(relative_source_path)
+            
+            docs_batch.extend(chunks)
+            docs_processed += len(chunks)
+            
+            # Если набралась полная партия, обрабатываем её
+            if len(docs_batch) >= batch_size:
+                if not collection_created:
+                    # Создаем новую коллекцию для первой партии
+                    QdrantVectorStore.from_documents(
+                        documents=docs_batch,
+                        url=config["qdrant_url"],
+                        collection_name=config["collection_name"],
+                        embedding=dense_embedder,
+                        force_recreate=True,
+                        vector_name="dense_vector",
+                        batch_size=64,
+                    )
+                    collection_created = True
+                else:
+                    # Добавляем к существующей коллекции
+                    client = get_qdrant_client()
+                    qdrant_store = QdrantVectorStore(
+                        client=client,
+                        collection_name=config["collection_name"],
+                        embedding=dense_embedder,
+                        vector_name="dense_vector",
+                    )
+                    qdrant_store.add_documents(docs_batch)
+                
+                # Очищаем партию
+                docs_batch = []
         except Exception as e:
             print(f"Ошибка при обработке файла {filepath}: {e}")
             continue
     
-    # Добавляем обработку .md файлов (исправлено: всегда используем абсолютные пути)
+    # Обрабатываем .md файлы
     for filepath in folder_path.rglob("*.md"):
         try:
             loaded_docs = TextLoader(str(filepath), encoding="utf-8").load()
             chunks = text_splitter.split_documents(loaded_docs)
-            abs_filepath = filepath.resolve()
             try:
+                # Получение относительного пути файла от корневой папки
+                abs_filepath = filepath.resolve()
                 relative_source_path = abs_filepath.relative_to(folder_path_resolved)
             except ValueError:
+                # Если файл не в корневой папке, используем полный путь
                 print(f"Предупреждение: Файл {filepath} не находится внутри {folder_path_resolved}. Используется полный путь.")
                 relative_source_path = abs_filepath
+            
+            # Добавляем метаданные к чанкам
             for chunk in chunks:
                 chunk.metadata["source"] = str(relative_source_path)
-            docs.extend(chunks)
+            
+            docs_batch.extend(chunks)
+            docs_processed += len(chunks)
+            
+            # Если набралась полная партия, обрабатываем её
+            if len(docs_batch) >= batch_size:
+                if not collection_created:
+                    # Создаем новую коллекцию для первой партии
+                    QdrantVectorStore.from_documents(
+                        documents=docs_batch,
+                        url=config["qdrant_url"],
+                        collection_name=config["collection_name"],
+                        embedding=dense_embedder,
+                        force_recreate=True,
+                        vector_name="dense_vector",
+                        batch_size=1,
+                    )
+                    collection_created = True
+                else:
+                    # Добавляем к существующей коллекции
+                    client = get_qdrant_client()
+                    qdrant_store = QdrantVectorStore(
+                        client=client,
+                        collection_name=config["collection_name"],
+                        embedding=dense_embedder,
+                        vector_name="dense_vector",
+                    )
+                    qdrant_store.add_documents(docs_batch)
+                
+                # Очищаем партию
+                docs_batch = []
         except Exception as e:
             print(f"Ошибка при обработке файла {filepath}: {e}")
             continue
-
+    
+    # Обрабатываем оставшиеся документы в последней партии
+    if docs_batch:
+        try:
+            if not collection_created:
+                # Создаем новую коллекцию для последней партии
+                QdrantVectorStore.from_documents(
+                    documents=docs_batch,
+                    url=config["qdrant_url"],
+                    collection_name=config["collection_name"],
+                    embedding=dense_embedder,
+                    force_recreate=True,
+                    vector_name="dense_vector",
+                    batch_size=64,
+                )
+            else:
+                # Добавляем к существующей коллекции
+                client = get_qdrant_client()
+                qdrant_store = QdrantVectorStore(
+                    client=client,
+                    collection_name=config["collection_name"],
+                    embedding=dense_embedder,
+                    vector_name="dense_vector",
+                )
+                qdrant_store.add_documents(docs_batch)
+        except Exception as e:
+            print(f"Ошибка при обработке последней партии документов: {e}")
+    
     # Проверка наличия документов для индексации
-    if not docs:
+    if docs_processed == 0:
         config["is_indexed"] = False
         save_config(config)
-        # ИЗМЕНЕНО: Возвращаем сообщение, которое не считается ошибкой, если файлов просто нет
-        # return True, "indexed_successfully_no_docs" 
-        # Или, чтобы совсем убрать сообщение, можно вернуть успех:
-        return True, "indexed_successfully" 
-    try:
-        device = get_device(config['device'])
-        dense_embedder = get_dense_embedder(config, device)
-        QdrantVectorStore.from_documents(
-            documents=docs,
-            url=config["qdrant_url"],
-            collection_name=config["collection_name"],
-            embedding=dense_embedder,
-            force_recreate=True,
-            vector_name="dense_vector",
-            batch_size=64,
-        )
-    except Exception as e:
-        print(f"Ошибка во время индексации: {e}")
-        print(traceback.format_exc())
-        return False, f"indexing_error: {e}"
+        return True, "indexed_successfully"
+    
     config["is_indexed"] = True
     save_config(config)
     return True, "indexed_successfully"
@@ -283,6 +382,8 @@ async def update_settings(
     collection_name: str = Form(None),
     hf_model: str = Form(None),
     chunk_size: str = Form(None), # Принимаем как строку, проверим и преобразуем позже
+    embedding_batch_size: str = Form(None),
+    indexing_batch_size: str = Form(None),
     chunk_overlap: str = Form(None),
     use_dense: str = Form(None), # Checkbox приходит как "True" или None
     device: str = Form(None),
@@ -324,6 +425,16 @@ async def update_settings(
                 updates["chunk_overlap"] = int(chunk_overlap)
             except ValueError:
                 pass
+        if embedding_batch_size is not None:
+            try:
+                updates["embedding_batch_size"] = int(embedding_batch_size)
+            except ValueError:
+                pass # Игнорируем некорректные значения
+        if indexing_batch_size is not None:
+            try:
+                updates["indexing_batch_size"] = int(indexing_batch_size)
+            except ValueError:
+                pass # Игнорируем некорректные значения
         # use_dense приходит как "True" или None
         updates["use_dense_vectors"] = use_dense == "True"
         if device is not None:

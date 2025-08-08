@@ -63,3 +63,9 @@ data_to_index/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Etc files
+.docx
+
+# Исключение для обновленного плана-графика
+Обновленный_план-график_KAZrag.md

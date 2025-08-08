@@ -72,6 +72,16 @@
                         <input type="number" id="chunk_overlap" name="chunk_overlap" value="{{ config.chunk_overlap }}" required>
                     </div>
                 </div>
+                <div class="grid-2col">
+                    <div>
+                        <label for="embedding_batch_size">Batch size для эмбеддинга (HuggingFace)</label>
+                        <input type="number" id="embedding_batch_size" name="embedding_batch_size" value="{{ config.embedding_batch_size }}" min="1" required>
+                    </div>
+                    <div>
+                        <label for="indexing_batch_size">Batch size для индексации (Qdrant)</label>
+                        <input type="number" id="indexing_batch_size" name="indexing_batch_size" value="{{ config.indexing_batch_size }}" min="1" required>
+                    </div>
+                </div>
                 
                 <fieldset>
                     <legend>Типы векторов для индексации</legend>
