@@ -1,19 +1,21 @@
 {
-    "folder_path": "./data_to_index",
-    "collection_name": "ESKD4000",
-    "current_hf_model": "Qwen/Qwen3-Embedding-4B",
+    "folder_path": "./data_to_index1",
+    "collection_name": "ESKD600GPU",
+    "current_hf_model": "./models/Qwen3-Embedding-4B-Q8_0.gguf",
     "hf_model_history": [
         "sentence-transformers/all-MiniLM-L6-v2",
         "sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
         "Qwen/Qwen3-Embedding-4B",
-        "Qwen/Qwen3-Embedding-0.6B"
+        "Qwen/Qwen3-Embedding-0.6B",
+        "Qwen/Qwen3-Embedding-4B-GGUF",
+        "./models/Qwen3-Embedding-4B-Q8_0.gguf"
     ],
     "chunk_size": 2000,
     "chunk_overlap": 100,
     "qdrant_url": "http://localhost:6333",
     "device": "cpu",
     "use_dense_vectors": true,
-    "is_indexed": false,
+    "is_indexed": true,
     "batch_size": 1,
     "mineru_input_pdf_dir": "./pdfs_to_process",
     "mineru_output_md_dir": "./data_to_index",

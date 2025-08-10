@@ -59,6 +59,10 @@ coverage.xml
 # PDF and markdown artifacts
 pdfs_to_process/
 data_to_index/
+data_to_index1/
+
+# Models
+models/
 
 # OS files
 .DS_Store
