@@ -1,8 +1,13 @@
 """Модуль для управления векторизаторами (эмбеддерами)."""
 
 import torch
+import logging
 from langchain_huggingface import HuggingFaceEmbeddings
-from config.settings import load_config
+from config.settings import load_config, Config
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Импортируем GGUF эмбеддер
 try:
@@ -10,7 +15,9 @@ try:
     GGUF_AVAILABLE = True
 except ImportError:
     GGUF_AVAILABLE = False
-    print("GGUF эмбеддер не доступен. Установите ctransformers для работы с GGUF моделями.")
+    # raise ImportError("GGUF эмбеддер не доступен. Установите ctransformers для работы с GGUF моделями.")
+    # Временно оставляем print для совместимости, но в будущем лучше использовать raise
+    logger.warning("GGUF эмбеддер не доступен. Установите ctransformers для работы с GGUF моделями.")
 
 # --- Кэш для embedder'а ---
 # Используем словарь для хранения моделей с ключом (модель, устройство)
@@ -33,16 +40,16 @@ def get_search_device(search_device_param: str) -> str:
 
 
 # --- Кэширование HuggingFaceEmbeddings ---
-def get_dense_embedder(config, device=None):
+def get_dense_embedder(config: Config, device=None):
     """Получает или создает кэшированный экземпляр эмбеддера."""
     global _dense_embedder_cache
-    model_name = config["current_hf_model"]
-    batch_size = config.get("embedding_batch_size", 32)
+    model_name = config.current_hf_model
+    batch_size = config.embedding_batch_size
     if device is None:
-        device = get_device(config["device"])
+        device = get_device(config.device)
     
     # Проверяем, является ли модель GGUF
-    if ("-gguf" in model_name.lower() or ".gguf" in model_name.lower()) and GGUF_AVAILABLE:
+    if model_name.lower().endswith('.gguf') and GGUF_AVAILABLE:
         return get_gguf_embedder(config, device)
     
     # Ключ кэша - кортеж (модель, устройство)

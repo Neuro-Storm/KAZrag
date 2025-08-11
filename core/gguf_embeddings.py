@@ -1,10 +1,15 @@
 """Модуль для работы с GGUF эмбеддерами."""
 
 import numpy as np
+import logging
 from typing import List
 from langchain_core.embeddings import Embeddings
-from config.settings import load_config
+from config.settings import load_config, Config
 import os
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Импортируем llama_cpp для правильной работы тестов
 try:
@@ -101,31 +106,20 @@ class GGUFEmbeddings(Embeddings):
             # Получаем эмбеддинг через llama.cpp
             embedding = self.model.create_embedding(text)
             # Извлекаем вектор из результата
-            if isinstance(embedding, dict) and "data" in embedding:
-                # Обрабатываем вложенный список
-                raw_vector = embedding["data"][0]["embedding"]
-                # Если это вложенный список, извлекаем первый элемент
-                if isinstance(raw_vector, list) and len(raw_vector) > 0:
-                    if isinstance(raw_vector[0], list):
-                        vector = raw_vector[0]
-                    else:
-                        vector = raw_vector
-                else:
-                    vector = raw_vector
-            elif hasattr(embedding, 'embedding'):
-                vector = embedding.embedding
-            else:
-                raise Exception("Не удалось извлечь эмбеддинг из результата модели")
+            vector = embedding.get('data', [{}])[0].get('embedding', []) or getattr(embedding, 'embedding', [])
+            if not vector:
+                raise ValueError("Invalid embedding format")
             
             # Проверяем размерность вектора
             if len(vector) != self.expected_dim:
-                print(f"Предупреждение: Размерность вектора {len(vector)} не соответствует ожидаемой {self.expected_dim}")
+                logger.warning(f"Embedding dimension mismatch: {len(vector)} vs {self.expected_dim}")
+                raise ValueError(f"Embedding dimension mismatch: {len(vector)} vs {self.expected_dim}")
                 # Если вектор больше, обрезаем его
-                if len(vector) > self.expected_dim:
-                    vector = vector[:self.expected_dim]
-                # Если вектор меньше, дополняем нулями
-                elif len(vector) < self.expected_dim:
-                    vector = vector + [0.0] * (self.expected_dim - len(vector))
+                # if len(vector) > self.expected_dim:
+                #     vector = vector[:self.expected_dim]
+                # # Если вектор меньше, дополняем нулями
+                # elif len(vector) < self.expected_dim:
+                #     vector = vector + [0.0] * (self.expected_dim - len(vector))
             
             return vector
         except Exception as e:
@@ -138,11 +132,11 @@ _gguf_embedder_cache = {}
 _embedding_dim_cache = {}
 
 
-def get_gguf_embedder(config, device=None):
+def get_gguf_embedder(config: Config, device=None):
     """Получает или создает кэшированный экземпляр GGUFEmbeddings."""
     global _gguf_embedder_cache, _embedding_dim_cache
-    model_name = config["current_hf_model"]
-    batch_size = config.get("embedding_batch_size", 32)
+    model_name = config.current_hf_model
+    batch_size = config.embedding_batch_size
     if device is None:
         device = "cpu"  # По умолчанию используем CPU для GGUF
     

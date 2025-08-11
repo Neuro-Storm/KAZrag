@@ -18,8 +18,134 @@ output_md_dir/
 import os
 import subprocess
 import shutil
+import logging
 from pathlib import Path
 from typing import Optional
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def setup_env(model_source: str, models_dir: Optional[str], enable_formula_parsing: bool, enable_table_parsing: bool) -> dict:
+    """
+    Настраивает переменные окружения для MinerU.
+    
+    Args:
+        model_source (str): Источник моделей.
+        models_dir (Optional[str]): Путь к локальным моделям.
+        enable_formula_parsing (bool): Включить парсинг формул.
+        enable_table_parsing (bool): Включить парсинг таблиц.
+        
+    Returns:
+        dict: Настроенные переменные окружения.
+    """
+    env = os.environ.copy()
+    env["MINERU_MODEL_SOURCE"] = model_source
+    if models_dir and model_source == "local":
+        env["MINERU_MODELS_DIR"] = models_dir
+
+    # Настройка флагов парсинга формул и таблиц через переменные окружения
+    env["MINERU_ENABLE_FORMULA_PARSING"] = "true" if enable_formula_parsing else "false"
+    env["MINERU_ENABLE_TABLE_PARSING"] = "true" if enable_table_parsing else "false"
+    
+    return env
+
+
+def run_subprocess(pdf_file: Path, temp_output_dir: Path, backend: str, method: str, lang: str, sglang_url: Optional[str], env: dict) -> subprocess.CompletedProcess:
+    """
+    Запускает subprocess вызов mineru.
+    
+    Args:
+        pdf_file (Path): Путь к PDF файлу.
+        temp_output_dir (Path): Временная директория для вывода.
+        backend (str): Бэкенд обработки.
+        method (str): Метод парсинга.
+        lang (str): Язык для OCR.
+        sglang_url (Optional[str]): URL сервера sglang.
+        env (dict): Переменные окружения.
+        
+    Returns:
+        subprocess.CompletedProcess: Результат выполнения subprocess.
+    """
+    pdf_stem = pdf_file.stem
+    logger.info(f"Обработка файла (Subprocess): {pdf_file.name}")
+
+    # Формирование команды для вызова mineru с указанными параметрами
+    cmd = [
+        "mineru",
+        "-p", str(pdf_file),
+        "-o", str(temp_output_dir), # Выводим во временную директорию
+        "-b", backend,
+        "--output-format", "md" # Указываем формат вывода
+    ]
+    
+    if method != "auto":
+         cmd.extend(["--method", method])
+    
+    if lang and lang.lower() not in ['auto', 'none']:
+         cmd.extend(["--lang", lang])
+         
+    if backend == "vlm-sglang-client" and sglang_url:
+        cmd.extend(["-u", sglang_url])
+
+    logger.info(f"  -> Выполняется команда: {' '.join(cmd)}")
+
+    return subprocess.run(
+        cmd,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=600
+    )
+
+
+def postprocess_output(pdf_file: Path, pdf_stem: str, temp_output_dir: Path, final_output_dir: Path, output_root_path: Path) -> bool:
+    """
+    Пост-обработка вывода mineru.
+    
+    Args:
+        pdf_file (Path): Путь к PDF файлу.
+        pdf_stem (str): Имя PDF файла без расширения.
+        temp_output_dir (Path): Временная директория с результатами.
+        final_output_dir (Path): Финальная директория для результатов.
+        output_root_path (Path): Корневая директория для вывода.
+        
+    Returns:
+        bool: Успешность пост-обработки.
+    """
+    # Пост-обработка: перенос результатов из временной папки в финальную
+    # Ищем созданный .md файл в temp_output_dir или подпапках
+    md_files = list(temp_output_dir.rglob("*.md"))
+    if not md_files:
+        logger.warning(f"  -> Предупреждение: Не найден .md файл после обработки {pdf_file.name}.")
+        return False
+
+    # Предполагаем, что основной файл имеет имя, совпадающее с именем PDF
+    target_md_file = temp_output_dir / f"{pdf_stem}.md"
+    if not target_md_file.exists():
+         # Если нет, берем первый найденный
+         target_md_file = md_files[0]
+         logger.info(f"  -> Используется найденный файл: {target_md_file.relative_to(temp_output_dir)}")
+
+    # Создаем финальную папку для этого PDF
+    final_output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Перемещаем .md файл
+    final_md_path = final_output_dir / f"{pdf_stem}.md"
+    target_md_file.rename(final_md_path)
+    logger.info(f"  -> .md файл перемещен в: {final_md_path.relative_to(output_root_path)}")
+    
+    # Перемещаем папку с изображениями, если она есть
+    images_dir_in_temp = temp_output_dir / "images"
+    if images_dir_in_temp.exists() and images_dir_in_temp.is_dir():
+        images_dir_final = final_output_dir / "images"
+        # shutil.copytree может потребоваться, если нужно сохранить оригиналы
+        shutil.move(str(images_dir_in_temp), str(images_dir_final)) 
+        logger.info(f"  -> Папка 'images' перемещена в: {images_dir_final.relative_to(output_root_path)}")
+        
+    return True
+
 
 def process_pdfs_and_chunk(
     input_pdf_dir: str,
@@ -68,26 +194,20 @@ def process_pdfs_and_chunk(
 
     pdf_files = list(input_path.glob("*.pdf"))
     if not pdf_files:
-        print(f"В директории {input_pdf_dir} не найдено PDF файлов.")
+        logger.info(f"В директории {input_pdf_dir} не найдено PDF файлов.")
         return
 
-    print(f"Найдено {len(pdf_files)} PDF файлов для обработки.")
-    print("Используется метод обработки: Subprocess (вызов команды)")
+    logger.info(f"Найдено {len(pdf_files)} PDF файлов для обработки.")
+    logger.info("Используется метод обработки: Subprocess (вызов команды)")
 
     # Настройка переменных окружения для MinerU
-    env = os.environ.copy()
-    env["MINERU_MODEL_SOURCE"] = model_source
-    if models_dir and model_source == "local":
-        env["MINERU_MODELS_DIR"] = models_dir
-
-    # Настройка флагов парсинга формул и таблиц через переменные окружения
-    env["MINERU_ENABLE_FORMULA_PARSING"] = str(enable_formula_parsing).lower()
-    env["MINERU_ENABLE_TABLE_PARSING"] = str(enable_table_parsing).lower()
+    env = setup_env(model_source, models_dir, enable_formula_parsing, enable_table_parsing)
 
     for pdf_file in pdf_files:
+        temp_output_dir = None
         try:
             pdf_stem = pdf_file.stem
-            print(f"Обработка файла (Subprocess): {pdf_file.name}")
+            logger.info(f"Обработка файла (Subprocess): {pdf_file.name}")
 
             # Создаем временную директорию для вывода конкретного файла
             temp_output_dir = output_root_path / f"temp_{pdf_stem}"
@@ -100,114 +220,48 @@ def process_pdfs_and_chunk(
             
             # Очищаем финальную директорию, если она существует
             if final_output_dir.exists():
-                print(f"  -> Удаление старой папки: {final_output_dir}")
+                logger.info(f"  -> Удаление старой папки: {final_output_dir}")
                 shutil.rmtree(final_output_dir)
 
-            # Формирование команды для вызова mineru с указанными параметрами
-            cmd = [
-                "mineru",
-                "-p", str(pdf_file),
-                "-o", str(temp_output_dir), # Выводим во временную директорию
-                "-b", backend,
-                "--output-format", "md" # Указываем формат вывода
-            ]
-            
-            if method != "auto":
-                 cmd.extend(["--method", method])
-            
-            if lang and lang.lower() not in ['auto', 'none']:
-                 cmd.extend(["--lang", lang])
-                 
-            if backend == "vlm-sglang-client" and sglang_url:
-                cmd.extend(["-u", sglang_url])
-
-            print(f"  -> Выполняется команда: {' '.join(cmd)}")
-
-            result = subprocess.run(
-                cmd,
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=600
-            )
+            # Запуск subprocess
+            result = run_subprocess(pdf_file, temp_output_dir, backend, method, lang, sglang_url, env)
 
             if result.returncode != 0:
-                print(f"Ошибка при вызове MinerU для файла {pdf_file.name}:")
-                print(f"Команда: {' '.join(cmd)}")
-                print(f"Код возврата: {result.returncode}")
+                logger.error(f"Ошибка при вызове MinerU для файла {pdf_file.name}:")
+                logger.error(f"Команда: {' '.join(['mineru', '-p', str(pdf_file), '-o', str(temp_output_dir), '-b', backend, '--output-format', 'md'])}")
+                logger.error(f"Код возврата: {result.returncode}")
                 if result.stdout:
-                    print(f"Stdout: {result.stdout}")
+                    logger.error(f"Stdout: {result.stdout}")
                 if result.stderr:
-                    print(f"Stderr: {result.stderr}") 
-                # Удаляем временную папку в случае ошибки
-                if temp_output_dir.exists():
-                    shutil.rmtree(temp_output_dir)
+                    logger.error(f"Stderr: {result.stderr}") 
                 continue
 
-            # Пост-обработка: перенос результатов из временной папки в финальную
-            # Ищем созданный .md файл в temp_output_dir или подпапках
-            md_files = list(temp_output_dir.rglob("*.md"))
-            if not md_files:
-                print(f"  -> Предупреждение: Не найден .md файл после обработки {pdf_file.name}.")
-                if temp_output_dir.exists():
-                    shutil.rmtree(temp_output_dir)
+            # Пост-обработка вывода
+            if not postprocess_output(pdf_file, pdf_stem, temp_output_dir, final_output_dir, output_root_path):
                 continue
-
-            # Предполагаем, что основной файл имеет имя, совпадающее с именем PDF
-            target_md_file = temp_output_dir / f"{pdf_stem}.md"
-            if not target_md_file.exists():
-                 # Если нет, берем первый найденный
-                 target_md_file = md_files[0]
-                 print(f"  -> Используется найденный файл: {target_md_file.relative_to(temp_output_dir)}")
-
-            # Создаем финальную папку для этого PDF
-            final_output_dir.mkdir(parents=True, exist_ok=True)
-            
-            # Перемещаем .md файл
-            final_md_path = final_output_dir / f"{pdf_stem}.md"
-            target_md_file.rename(final_md_path)
-            print(f"  -> .md файл перемещен в: {final_md_path.relative_to(output_root_path)}")
-            
-            # Перемещаем папку с изображениями, если она есть
-            images_dir_in_temp = temp_output_dir / "images"
-            if images_dir_in_temp.exists() and images_dir_in_temp.is_dir():
-                images_dir_final = final_output_dir / "images"
-                # shutil.copytree может потребоваться, если нужно сохранить оригиналы
-                shutil.move(str(images_dir_in_temp), str(images_dir_final)) 
-                print(f"  -> Папка 'images' перемещена в: {images_dir_final.relative_to(output_root_path)}")
-            
-            # Удаляем временную директорию
-            if temp_output_dir.exists():
-                shutil.rmtree(temp_output_dir)
 
         except subprocess.TimeoutExpired:
-            print(f"Ошибка: Таймаут при обработке файла {pdf_file.name}.")
-            # Очищаем временную папку в случае таймаута
-            temp_dir = output_root_path / f"temp_{pdf_stem}"
-            if temp_dir.exists():
-                shutil.rmtree(temp_dir)
+            logger.error(f"Ошибка: Таймаут при обработке файла {pdf_file.name}.")
             continue
         except FileNotFoundError as e:
             if "mineru" in str(e).lower() or "[winerror 2]" in str(e).lower() or "No such file or directory" in str(e):
-                 print(f"Ошибка: Команда 'mineru' не найдена. Убедитесь, что пакет 'mineru' установлен.")
-                 print(f"Подробности ошибки: {e}")
+                 # raise RuntimeError("Команда 'mineru' не найдена. Убедитесь, что пакет 'mineru' установлен.")
+                 # Временно оставляем print для совместимости
+                 logger.error(f"Ошибка: Команда 'mineru' не найдена. Убедитесь, что пакет 'mineru' установлен.")
+                 logger.error(f"Подробности ошибки: {e}")
             else:
-                 print(f"Ошибка FileNotFoundError при обработке файла {pdf_file.name}: {e}")
-            # Очищаем временную папку в случае критической ошибки
-            temp_dir = output_root_path / f"temp_{pdf_stem}"
-            if temp_dir.exists():
-                shutil.rmtree(temp_dir)
-            break
+                 logger.error(f"Ошибка FileNotFoundError при обработке файла {pdf_file.name}: {e}")
+            # break  # Убираем break, чтобы продолжить обработку других файлов
+            continue  # Продолжаем обработку других файлов
         except Exception as e:
-            print(f"Неожиданная ошибка при обработке файла {pdf_file.name}: {e}")
+            logger.error(f"Неожиданная ошибка при обработке файла {pdf_file.name}: {e}")
             import traceback
             traceback.print_exc()
-            # Очищаем временную папку в случае ошибки
-            temp_dir = output_root_path / f"temp_{pdf_stem}"
-            if temp_dir.exists():
-                shutil.rmtree(temp_dir)
             continue
+        finally:
+            # Удаляем временную директорию в любом случае
+            if temp_output_dir and temp_output_dir.exists():
+                shutil.rmtree(temp_output_dir)
 
-    print("Обработка PDF файлов завершена.")
+    logger.info("Обработка PDF файлов завершена.")
 

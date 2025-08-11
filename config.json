@@ -12,11 +12,12 @@
     ],
     "chunk_size": 2000,
     "chunk_overlap": 100,
-    "qdrant_url": "http://localhost:6333",
     "device": "cpu",
     "use_dense_vectors": true,
-    "is_indexed": true,
-    "batch_size": 1,
+    "is_indexed": false,
+    "embedding_batch_size": 1,
+    "indexing_batch_size": 1,
+    "qdrant_url": "http://localhost:6333",
     "mineru_input_pdf_dir": "./pdfs_to_process",
     "mineru_output_md_dir": "./data_to_index",
     "mineru_enable_formula_parsing": true,
@@ -26,7 +27,5 @@
     "mineru_backend": "pipeline",
     "mineru_method": "auto",
     "mineru_lang": "east_slavic",
-    "mineru_sglang_url": "",
-    "embedding_batch_size": 1,
-    "indexing_batch_size": 1
+    "mineru_sglang_url": ""
 }

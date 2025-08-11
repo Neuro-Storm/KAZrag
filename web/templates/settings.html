@@ -27,7 +27,7 @@
     <main>
         {% if status or delete_status %}
             {% set msg = status or delete_status %}
-            <div class="status-msg {{ 'success' if 'success' in msg or 'saved' in msg or 'indexed' in msg or 'deleted_' in msg or 'pdfs_processed' in msg else 'error' if 'fail' in msg or 'error' in msg else 'info' }}">
+            <div class="status-msg {{ 'success' if 'success' in msg or 'saved' in msg or 'indexed' in msg or 'deleted_' in msg or 'pdfs_processed' in msg else 'error' if 'error' in msg or 'fail' in msg or 'no_index_type' in msg or 'delete_error' in msg or 'pdf_processing_error' in msg else 'info' }}">
                 {% if msg == 'saved' %}Настройки сохранены.{% endif %}
                 {% if msg == 'indexed_successfully' %}Индексация успешно завершена!{% endif %}
                 {% if msg == 'indexed_successfully_no_docs' %}Индексация завершена. Не найдено .txt/.md файлов для обработки.{% endif %}
@@ -41,7 +41,7 @@
         {% endif %}
         
         <!-- Объединенная форма -->
-        <form action="/update-settings" method="post">
+        <form action="/api/admin/update-settings" method="post">
             <input type="hidden" name="action" value="save_index_settings"> <!-- Значение по умолчанию, будет перезаписано JS или кнопкой -->
             
             <!-- Секция настроек индексации -->
@@ -103,7 +103,7 @@
             </div>
         </form>
         
-        <form action="/update-settings" method="post">
+        <form action="/api/admin/update-settings" method="post">
             <input type="hidden" name="action" value="save_mineru_settings"> <!-- Значение по умолчанию -->
             
             <!-- Секция настроек MinerU -->
@@ -181,7 +181,7 @@
         <hr>
         
         <h2>Управление коллекциями</h2>
-        <form action="/settings/delete-collection" method="post">
+        <form action="/api/admin/settings/delete-collection" method="post">
              <label for="collection_to_delete">Удалить коллекцию:
                 <select id="collection_to_delete" name="collection_name" required>
                     <option value="">-- Выберите коллекцию --</option>
@@ -200,14 +200,14 @@
             <div>
                 <h3>Обработка PDF</h3>
                 <p>Преобразовать PDF из <strong>{{ config.mineru_input_pdf_dir }}</strong> в Markdown и сохранить в <strong>{{ config.mineru_output_md_dir }}</strong>.</p>
-                <form action="/process-pdfs" method="post">
+                <form action="/api/admin/process-pdfs" method="post">
                     <button type="submit">Запустить обработку PDF (Subprocess)</button>
                 </form>
             </div>
             <div>
                 <h3>Управление индексом</h3>
                 <p>Проиндексировать данные из <strong>{{ config.folder_path }}</strong> в коллекцию <strong>{{ config.collection_name }}</strong>.</p>
-                <form action="/run-indexing" method="post">
+                <form action="/api/admin/run-indexing" method="post">
                     <button type="submit">Запустить индексацию</button>
                 </form>
             </div>

@@ -1,3 +1,5 @@
+# Игнорировать план-график и подобные документы
+*.docx
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -63,6 +65,10 @@ data_to_index1/
 
 # Models
 models/
+
+# Source code collection script and its output
+collect_source_code.py
+project_source_code.txt
 
 # OS files
 .DS_Store

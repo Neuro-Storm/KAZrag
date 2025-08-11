@@ -13,3 +13,4 @@ jinja2
 python-multipart
 scipy
 mineru # Добавлено
+python-dotenv # Для работы с переменными окружения

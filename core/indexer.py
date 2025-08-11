@@ -2,6 +2,7 @@
 
 import time
 import traceback
+import logging
 from pathlib import Path
 from typing import List, Tuple, Any
 
@@ -9,15 +10,19 @@ from langchain_community.document_loaders import TextLoader
 from qdrant_client import QdrantClient
 from langchain_qdrant import QdrantVectorStore
 
-from config.settings import load_config, save_config
+from config.settings import load_config, save_config, Config
 from core.embeddings import get_dense_embedder, get_device
 from core.chunker import get_text_splitter
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def get_qdrant_client() -> QdrantClient:
     """Создает и возвращает клиент Qdrant."""
-    config = load_config()
-    return QdrantClient(url=config["qdrant_url"])
+    config: Config = load_config()
+    return QdrantClient(url=config.qdrant_url)
 
 
 def run_indexing_logic() -> Tuple[bool, str]:
@@ -27,11 +32,11 @@ def run_indexing_logic() -> Tuple[bool, str]:
     Returns:
         Tuple[bool, str]: (успех, статус)
     """
-    config = load_config()
-    if not config.get("use_dense_vectors", False):
+    config: Config = load_config()
+    if not config.use_dense_vectors:
         return False, "no_index_type"
     
-    folder_path = Path(config["folder_path"])
+    folder_path = Path(config.folder_path)
     folder_path_resolved = folder_path.resolve() # Для получения относительных путей
     if not folder_path.is_dir():
         return False, "folder_not_found"
@@ -39,15 +44,20 @@ def run_indexing_logic() -> Tuple[bool, str]:
     text_splitter = get_text_splitter()
     
     # Загрузить модель эмбеддинга один раз
-    device = get_device(config['device'])
+    device = get_device(config.device)
     dense_embedder = get_dense_embedder(config, device)
     
     # Параметры для пакетной обработки
-    batch_size = config.get("indexing_batch_size", 50)  # Получаем из конфигурации, по умолчанию 50
+    batch_size = config.indexing_batch_size  # Получаем из конфигурации
 
     docs_batch = []
     collection_created = False
     docs_processed = 0
+    
+    # Проверяем наличие коллекции и удаляем её, если force_recreate=True
+    client = get_qdrant_client()
+    if client.has_collection(config.collection_name):
+        client.delete_collection(config.collection_name)
     
     def process_file(filepath, file_extension):
         """Общая функция для обработки .txt и .md файлов."""
@@ -60,9 +70,9 @@ def run_indexing_logic() -> Tuple[bool, str]:
                 abs_filepath = filepath.resolve()
                 relative_source_path = abs_filepath.relative_to(folder_path_resolved)
             except ValueError:
-                # Если файл не в корневой папке, используем полный путь
-                print(f"Предупреждение: Файл {filepath} не находится внутри {folder_path_resolved}. Используется полный путь.")
-                relative_source_path = abs_filepath
+                # Если файл не в корневой папке, используем только имя файла
+                logger.warning(f"Файл {filepath} не находится внутри {folder_path_resolved}. Используется только имя файла.")
+                relative_source_path = abs_filepath.name
             
             # Добавляем метаданные к чанкам
             for chunk in chunks:
@@ -77,13 +87,13 @@ def run_indexing_logic() -> Tuple[bool, str]:
                     # Создаем новую коллекцию для первой партии
                     QdrantVectorStore.from_documents(
                         documents=docs_batch,
-                        url=config["qdrant_url"],
-                        collection_name=config["collection_name"],
+                        url=config.qdrant_url,
+                        collection_name=config.collection_name,
                         embedding=dense_embedder,
                         force_recreate=True,
                         vector_name="dense_vector",
                         # Используем batch_size из конфига для Qdrant
-                        batch_size=config.get("indexing_batch_size", 50),
+                        batch_size=config.indexing_batch_size,
                     )
                     collection_created = True
                 else:
@@ -91,7 +101,7 @@ def run_indexing_logic() -> Tuple[bool, str]:
                     client = get_qdrant_client()
                     qdrant_store = QdrantVectorStore(
                         client=client,
-                        collection_name=config["collection_name"],
+                        collection_name=config.collection_name,
                         embedding=dense_embedder,
                         vector_name="dense_vector",
                     )
@@ -118,34 +128,34 @@ def run_indexing_logic() -> Tuple[bool, str]:
                 # Создаем новую коллекцию для последней партии
                 QdrantVectorStore.from_documents(
                     documents=docs_batch,
-                    url=config["qdrant_url"],
-                    collection_name=config["collection_name"],
+                    url=config.qdrant_url,
+                    collection_name=config.collection_name,
                     embedding=dense_embedder,
                     force_recreate=True,
                     vector_name="dense_vector",
-                    batch_size=config.get("indexing_batch_size", 50),
+                    batch_size=config.indexing_batch_size,
                 )
             else:
                 # Добавляем к существующей коллекции
                 client = get_qdrant_client()
                 qdrant_store = QdrantVectorStore(
                     client=client,
-                    collection_name=config["collection_name"],
+                    collection_name=config.collection_name,
                     embedding=dense_embedder,
                     vector_name="dense_vector",
                 )
                 qdrant_store.add_documents(docs_batch)
         except Exception as e:
-            print(f"Ошибка при обработке последней партии документов: {e}")
+            logger.error(f"Ошибка при обработке последней партии документов: {e}")
             # traceback.print_exc() # Опционально, для отладки
     
     # Проверка наличия документов для индексации
     # Исправлено: теперь возвращает успех даже если документов нет, но операция завершена
     if docs_processed == 0:
-        config["is_indexed"] = False
+        config.is_indexed = True  # Устанавливаем True, так как операция завершена успешно
         save_config(config)
         return True, "indexed_successfully_no_docs"
     
-    config["is_indexed"] = True
+    config.is_indexed = True
     save_config(config)
     return True, "indexed_successfully"
