@@ -2,11 +2,19 @@
 
 import torch
 import logging
+from functools import lru_cache
 from langchain_huggingface import HuggingFaceEmbeddings
 from config.settings import load_config, Config
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # Импортируем GGUF эмбеддер
@@ -19,11 +27,13 @@ except ImportError:
     # Временно оставляем print для совместимости, но в будущем лучше использовать raise
     logger.warning("GGUF эмбеддер не доступен. Установите ctransformers для работы с GGUF моделями.")
 
+
 # --- Кэш для embedder'а ---
 # Используем словарь для хранения моделей с ключом (модель, устройство)
 _dense_embedder_cache = {}
 
 
+@lru_cache
 def get_device(config_device: str) -> str:
     """Определяет устройство для индексации из конфига."""
     if config_device == "cuda" and torch.cuda.is_available():
@@ -31,6 +41,7 @@ def get_device(config_device: str) -> str:
     if config_device == "cpu":
         return "cpu"
     return "cuda" if torch.cuda.is_available() else "cpu"
+
 
 def get_search_device(search_device_param: str) -> str:
     """Определяет устройство для поиска из параметра формы."""
@@ -49,8 +60,11 @@ def get_dense_embedder(config: Config, device=None):
         device = get_device(config.device)
     
     # Проверяем, является ли модель GGUF
-    if model_name.lower().endswith('.gguf') and GGUF_AVAILABLE:
-        return get_gguf_embedder(config, device)
+    if model_name.lower().endswith('.gguf'):
+        if GGUF_AVAILABLE:
+            return get_gguf_embedder(config, device)
+        else:
+            raise ImportError("GGUF эмбеддер не доступен. Установите llama-cpp-python для работы с GGUF моделями.")
     
     # Ключ кэша - кортеж (модель, устройство)
     cache_key = (model_name, device)

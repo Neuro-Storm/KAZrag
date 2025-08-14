@@ -15,7 +15,14 @@ from core.embeddings import get_dense_embedder, get_device
 from core.chunker import get_text_splitter
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 
@@ -25,10 +32,19 @@ def get_qdrant_client() -> QdrantClient:
     return QdrantClient(url=config.qdrant_url)
 
 
-def run_indexing_logic() -> Tuple[bool, str]:
+def get_qdrant_client() -> QdrantClient:
+    """Создает и возвращает клиент Qdrant."""
+    config: Config = load_config()
+    return QdrantClient(url=config.qdrant_url)
+
+
+def run_indexing_logic(client: QdrantClient = None) -> Tuple[bool, str]:
     """
     Основная логика индексации документов.
     
+    Args:
+        client (QdrantClient, optional): Клиент Qdrant. Если не указан, создается новый.
+        
     Returns:
         Tuple[bool, str]: (успех, статус)
     """
@@ -54,10 +70,19 @@ def run_indexing_logic() -> Tuple[bool, str]:
     collection_created = False
     docs_processed = 0
     
+    # Если клиент не передан, создаем новый
+    if client is None:
+        client = get_qdrant_client()
+    
     # Проверяем наличие коллекции и удаляем её, если force_recreate=True
-    client = get_qdrant_client()
-    if client.has_collection(config.collection_name):
-        client.delete_collection(config.collection_name)
+    try:
+        client.get_collection(config.collection_name)
+        # Если коллекция существует и force_recreate=True, удаляем её
+        if config.force_recreate:
+            client.delete_collection(config.collection_name)
+    except Exception:
+        # Коллекция не существует, ничего не делаем
+        pass
     
     def process_file(filepath, file_extension):
         """Общая функция для обработки .txt и .md файлов."""

@@ -23,7 +23,14 @@ from pathlib import Path
 from typing import Optional
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 def setup_env(model_source: str, models_dir: Optional[str], enable_formula_parsing: bool, enable_table_parsing: bool) -> dict:

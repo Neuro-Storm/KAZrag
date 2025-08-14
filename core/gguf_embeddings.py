@@ -8,7 +8,14 @@ from config.settings import load_config, Config
 import os
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 # Импортируем llama_cpp для правильной работы тестов
@@ -36,13 +43,17 @@ class GGUFEmbeddings(Embeddings):
             # Проверяем, существует ли файл модели
             if not os.path.exists(model_path):
                 # Если файл не найден, пытаемся найти его в стандартных местах
+                models_dir = os.getenv("MODELS_DIR", "")
                 possible_paths = [
                     model_path,
                     os.path.join("models", model_path),
                     os.path.join("data", model_path),
                     os.path.join("..", "models", model_path),
-                    os.path.join("D:", "models", model_path),
                 ]
+                
+                # Добавляем путь из переменной окружения MODELS_DIR, если она установлена
+                if models_dir:
+                    possible_paths.append(os.path.join(models_dir, model_path))
                 
                 found = False
                 for path in possible_paths:
@@ -112,14 +123,8 @@ class GGUFEmbeddings(Embeddings):
             
             # Проверяем размерность вектора
             if len(vector) != self.expected_dim:
-                logger.warning(f"Embedding dimension mismatch: {len(vector)} vs {self.expected_dim}")
+                # logger.warning(f"Embedding dimension mismatch: {len(vector)} vs {self.expected_dim}")
                 raise ValueError(f"Embedding dimension mismatch: {len(vector)} vs {self.expected_dim}")
-                # Если вектор больше, обрезаем его
-                # if len(vector) > self.expected_dim:
-                #     vector = vector[:self.expected_dim]
-                # # Если вектор меньше, дополняем нулями
-                # elif len(vector) < self.expected_dim:
-                #     vector = vector + [0.0] * (self.expected_dim - len(vector))
             
             return vector
         except Exception as e:

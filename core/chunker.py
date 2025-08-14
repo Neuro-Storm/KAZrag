@@ -1,14 +1,23 @@
 """Модуль для нарезки текста на чанки."""
 
 import logging
+from functools import lru_cache
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config.settings import load_config, Config
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 
+@lru_cache
 def get_text_splitter():
     """Создает и возвращает экземпляр RecursiveCharacterTextSplitter на основе конфигурации."""
     config: Config = load_config()

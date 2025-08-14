@@ -3,6 +3,7 @@
 import traceback
 import os
 import logging
+from typing import Optional
 from fastapi import FastAPI, Form, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -14,14 +15,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 from config.settings import load_config, save_config, Config
-from core.indexer import run_indexing_logic, get_qdrant_client
+from core.indexer import run_indexing_logic
 from core.file_converter import run_pdf_processing_from_config
 from core.qdrant_collections import get_cached_collections, refresh_collections_cache
-from core.dependencies import get_config
+from core.dependencies import get_config, get_client
 
 # Инициализация FastAPI приложения и шаблонов
 app = FastAPI()
@@ -37,6 +45,7 @@ async def verify_admin_access(credentials: HTTPBasicCredentials = Depends(securi
     """Проверяет учетные данные для доступа к админке."""
     # Если API ключ не установлен в .env, разрешаем доступ без аутентификации
     if not ADMIN_API_KEY:
+        logger.warning("No API key set for admin access. Admin access is open.")
         return None
     
     # Проверяем учетные данные
@@ -65,16 +74,15 @@ async def get_settings_page(request: Request, status: str = None, username: str 
 
 
 @app.post("/settings/delete-collection", response_class=RedirectResponse)
-async def delete_collection(request: Request, collection_name: str = Form(...), username: str = Depends(verify_admin_access), config: Config = Depends(get_config)):
+async def delete_collection(request: Request, collection_name: str = Form(...), username: str = Depends(verify_admin_access), config: Config = Depends(get_config), client: QdrantClient = Depends(get_client)):
     """Удаляет указанную коллекцию из Qdrant."""
-    client = get_qdrant_client()
     status_msg = ""
     try:
         if not collection_name:
              status_msg = "error_no_collection_selected"
         else:
             client.delete_collection(collection_name)
-            refresh_collections_cache()  # Обновляем кэш после удаления
+            refresh_collections_cache(client=client)  # Обновляем кэш после удаления
             status_msg = f"deleted_{collection_name}"
     except Exception as e:
         logger.error(f"Ошибка при удалении коллекции '{collection_name}': {e}")
@@ -94,19 +102,19 @@ async def update_settings(
     embedding_batch_size: str = Form(None),
     indexing_batch_size: str = Form(None),
     chunk_overlap: str = Form(None),
-    use_dense: str = Form(None), # Checkbox приходит как "True" или None
+    use_dense: bool = Form(False), # Checkbox
     device: str = Form(None),
     # --- Поля MinerU ---
     mineru_input_pdf_dir: str = Form(None),
     mineru_output_md_dir: str = Form(None),
-    mineru_enable_formula_parsing: str = Form(None), # Checkbox
-    mineru_enable_table_parsing: str = Form(None),   # Checkbox
+    mineru_enable_formula_parsing: bool = Form(False), # Checkbox
+    mineru_enable_table_parsing: bool = Form(False),   # Checkbox
     mineru_model_source: str = Form(None),
-    mineru_models_dir: str = Form(""),
+    mineru_models_dir: Optional[str] = Form(None),
     mineru_backend: str = Form(None),
     mineru_method: str = Form(None),
     mineru_lang: str = Form(None),
-    mineru_sglang_url: str = Form(""),
+    mineru_sglang_url: Optional[str] = Form(None),
     # --- Новое поле для определения действия ---
     action: str = Form(...), # Это поле будет определять, какие настройки сохранять
     username: str = Depends(verify_admin_access),
@@ -133,27 +141,27 @@ async def update_settings(
                 config.chunk_size = int(chunk_size)
             except ValueError:
                 # Можно добавить flash сообщение об ошибке
-                pass # Игнорируем некорректные значения
+                return RedirectResponse(url="/settings?status=invalid_chunk_size", status_code=303)
         if chunk_overlap is not None:
             try:
                 config.chunk_overlap = int(chunk_overlap)
             except ValueError:
                 # Можно добавить flash сообщение об ошибке
-                pass
+                return RedirectResponse(url="/settings?status=invalid_chunk_overlap", status_code=303)
         if embedding_batch_size is not None:
             try:
                 config.embedding_batch_size = int(embedding_batch_size)
             except ValueError:
                 # Можно добавить flash сообщение об ошибке
-                pass # Игнорируем некорректные значения
+                return RedirectResponse(url="/settings?status=invalid_embedding_batch_size", status_code=303)
         if indexing_batch_size is not None:
             try:
                 config.indexing_batch_size = int(indexing_batch_size)
             except ValueError:
                 # Можно добавить flash сообщение об ошибке
-                pass # Игнорируем некорректные значения
-        # use_dense приходит как "True" или None
-        config.use_dense_vectors = use_dense == "True"
+                return RedirectResponse(url="/settings?status=invalid_indexing_batch_size", status_code=303)
+        # use_dense теперь bool
+        config.use_dense_vectors = use_dense
         if device is not None:
             config.device = device
             if device != config.device:
@@ -167,6 +175,9 @@ async def update_settings(
         if model_changed or device_changed:
             from core.embeddings import _dense_embedder_cache
             _dense_embedder_cache.clear()
+            # Сброс кэша text_splitter при смене chunk_size или chunk_overlap
+            from core.chunker import get_text_splitter
+            get_text_splitter.cache_clear()
             # Принудительно очищаем GPU память, если используется CUDA
             try:
                 import torch
@@ -179,26 +190,30 @@ async def update_settings(
     elif action == "save_mineru_settings":
         if mineru_input_pdf_dir is not None: config.mineru_input_pdf_dir = mineru_input_pdf_dir
         if mineru_output_md_dir is not None: config.mineru_output_md_dir = mineru_output_md_dir
-        # Checkboxes
-        config.mineru_enable_formula_parsing = mineru_enable_formula_parsing == "True"
-        config.mineru_enable_table_parsing = mineru_enable_table_parsing == "True"
+        # Checkboxes теперь bool
+        config.mineru_enable_formula_parsing = mineru_enable_formula_parsing
+        config.mineru_enable_table_parsing = mineru_enable_table_parsing
         if mineru_model_source is not None: config.mineru_model_source = mineru_model_source
-        if mineru_models_dir is not None and mineru_models_dir != "": config.mineru_models_dir = mineru_models_dir
+        # Optional поля
+        if mineru_models_dir is not None and mineru_models_dir.strip(): 
+            config.mineru_models_dir = mineru_models_dir.strip()
         if mineru_backend is not None: config.mineru_backend = mineru_backend
         if mineru_method is not None: config.mineru_method = mineru_method
         if mineru_lang is not None: config.mineru_lang = mineru_lang
-        if mineru_sglang_url is not None and mineru_sglang_url != "": config.mineru_sglang_url = mineru_sglang_url
+        # Optional поля
+        if mineru_sglang_url is not None and mineru_sglang_url.strip(): 
+            config.mineru_sglang_url = mineru_sglang_url.strip()
         
     save_config(config)
     return RedirectResponse(url="/settings?status=saved", status_code=303)
 
 
 @app.post("/run-indexing", response_class=RedirectResponse)
-async def run_indexing(username: str = Depends(verify_admin_access), config: Config = Depends(get_config)):
+async def run_indexing(username: str = Depends(verify_admin_access), config: Config = Depends(get_config), client: QdrantClient = Depends(get_client)):
     """Запускает процесс индексации документов."""
-    success, status = run_indexing_logic()
+    success, status = run_indexing_logic(client=client)
     if success and "successfully" in status:
-        refresh_collections_cache()  # Обновляем кэш после индексации
+        refresh_collections_cache(client=client)  # Обновляем кэш после индексации
     return RedirectResponse(url=f"/settings?status={status}", status_code=303)
 
 

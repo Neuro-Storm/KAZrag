@@ -8,7 +8,14 @@ from config.settings import load_config, Config
 from core.embeddings import get_dense_embedder, get_search_device
 
 # Настройка логирования
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('app.log', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
 
@@ -18,67 +25,44 @@ def get_qdrant_client() -> QdrantClient:
     return QdrantClient(url=config.qdrant_url)
 
 
-def search_in_collection(
-    query: str, 
-    collection_name: str, 
-    search_device: str = "cpu", 
-    k: int = 5
-) -> Tuple[List[Tuple[Any, float]], Optional[str]]:
+def search_in_collection(query: str, collection_name: str, device: str, k: int, client: QdrantClient = None) -> Tuple[List[Tuple[Any, float]], Optional[str]]:
     """
-    Выполняет семантический поиск в указанной коллекции Qdrant.
+    Выполняет поиск в указанной коллекции Qdrant.
     
     Args:
         query (str): Поисковый запрос.
-        collection_name (str): Имя коллекции для поиска.
-        search_device (str): Устройство для поиска ("cpu" или "cuda").
+        collection_name (str): Название коллекции.
+        device (str): Устройство для поиска ("cpu" или "cuda").
         k (int): Количество результатов.
+        client (QdrantClient, optional): Клиент Qdrant. Если не указан, создается новый.
         
     Returns:
-        Tuple[List[Tuple[Any, float]], Optional[str]]: Список кортежей (документ, оценка схожести) и сообщение об ошибке (если есть).
+        Tuple[List[Tuple[Any, float]], Optional[str]]: (результаты поиска, ошибка)
     """
-    logger.info(f"Starting search for query: {query}, collection: {collection_name}, device: {search_device}, k: {k}")
-    
-    client = get_qdrant_client()
-    config: Config = load_config()
-    results: List[Tuple[Any, float]] = []
-    
-    # Проверяем наличие коллекции
-    logger.info(f"Checking if collection {collection_name} exists")
     try:
-        client.get_collection(collection_name)
-        collection_exists = True
-    except Exception:
-        collection_exists = False
-    
-    if not collection_exists:
-        logger.warning(f"Collection {collection_name} not found")
-        return [], "collection_not_found"
-    
-    try:
-        if config.use_dense_vectors:
-            logger.info("Using dense vectors for search")
-            device = get_search_device(search_device)
-            logger.info(f"Search device determined: {device}")
-            dense_embedder = get_dense_embedder(config, device)
-            logger.info("Dense embedder created successfully")
-            
-            qdrant_store = QdrantVectorStore(
-                client=client,
-                collection_name=collection_name,
-                embedding=dense_embedder,
-                vector_name="dense_vector",
-            )
-            logger.info("QdrantVectorStore created successfully")
-            
-            results = qdrant_store.similarity_search_with_score(query=query, k=k)
-            logger.info(f"Search completed, found {len(results)} results")
-        else:
-            logger.info("Dense vectors are not enabled")
-    except Exception as e:
-        logger.error(f"Error during search: {e}")
-        import traceback
-        traceback.print_exc()
-        results = []
-        return results, str(e)
+        config: Config = load_config()
         
-    return results, None
+        # Если клиент не передан, создаем новый
+        if client is None:
+            client = get_qdrant_client()
+            
+        # Получаем эмбеддер для поиска
+        search_device = get_search_device(device)
+        embedder = get_dense_embedder(config, search_device)
+        
+        # Создаем QdrantVectorStore для поиска
+        qdrant = QdrantVectorStore(
+            client=client,
+            collection_name=collection_name,
+            embedding=embedder,
+            vector_name="dense_vector"
+        )
+        
+        # Выполняем поиск
+        results = qdrant.similarity_search_with_score(query, k=k)
+            
+        return results, None
+        
+    except Exception as e:
+        logger.error(f"Ошибка при поиске: {e}")
+        return [], f"Ошибка при поиске: {str(e)}"

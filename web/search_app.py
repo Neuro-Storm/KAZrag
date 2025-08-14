@@ -6,10 +6,10 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from qdrant_client import QdrantClient
 
-from core.searcher import search_in_collection, get_qdrant_client
+from core.searcher import search_in_collection
 from core.qdrant_collections import get_cached_collections
 from config.settings import load_config, Config
-from core.dependencies import get_config
+from core.dependencies import get_config, get_client
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
@@ -21,9 +21,9 @@ templates = Jinja2Templates(directory="web/templates")
 
 
 @app.get("/", response_class=HTMLResponse)
-async def get_search_page(request: Request, config: Config = Depends(get_config)):
+async def get_search_page(request: Request, config: Config = Depends(get_config), client: QdrantClient = Depends(get_client)):
     """Отображает главную страницу поиска."""
-    collections = get_cached_collections()
+    collections = get_cached_collections(client=client)
     return templates.TemplateResponse("index.html", {
         "request": request, "results": [], "collections": collections
     })
@@ -36,12 +36,12 @@ async def handle_search(
     collection: str = Form(...),
     search_device: str = Form("cpu"),
     k: int = Form(5),
-    config: Config = Depends(get_config)
+    config: Config = Depends(get_config),
+    client: QdrantClient = Depends(get_client)
 ):
     """Обрабатывает поисковый запрос."""
-    results, error = search_in_collection(query, collection, search_device, k)
-    client = get_qdrant_client()
-    collections = [c.name for c in client.get_collections().collections]
+    results, error = search_in_collection(query, collection, search_device, k, client=client)
+    collections = get_cached_collections(client=client)
     
     template_context = {
         "request": request,

@@ -28,6 +28,7 @@ class Config(BaseModel):
     is_indexed: bool = False
     embedding_batch_size: int = 32
     indexing_batch_size: int = 50
+    force_recreate: bool = True
     
     # Настройки Qdrant
     qdrant_url: str = "http://localhost:6333"
@@ -59,7 +60,14 @@ def load_config() -> Config:
         config_dict = json.load(f)
         
     # Создаем объект Config из словаря
-    config = Config(**config_dict)
+    try:
+        config = Config(**config_dict)
+    except Exception as e:
+        logger.error(f"Ошибка валидации конфигурации: {e}")
+        # Создаем конфигурацию по умолчанию и сохраняем её
+        config = Config()
+        save_config(config)
+        return config
         
     # Проверяем доступность Qdrant
     try:
