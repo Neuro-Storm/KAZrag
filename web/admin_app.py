@@ -461,7 +461,7 @@ async def process_pdfs_endpoint(background_tasks: BackgroundTasks, username: str
     """Запускает процесс обработки PDF файлов."""
     background_tasks.add_task(run_pdf_processing_from_config)
     # success, status_msg = await run_pdf_processing_from_config()
-    return RedirectResponse(url=f"/api/admin/settings?msg=processing_started", status_code=303)
+    return RedirectResponse(url=f"/settings?msg=processing_started", status_code=303)
 
 
 # Эндпоинт для обработки файлов различных форматов
@@ -469,4 +469,4 @@ async def process_pdfs_endpoint(background_tasks: BackgroundTasks, username: str
 async def process_files_endpoint(background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access), config: Config = Depends(get_config)):
     """Запускает процесс обработки файлов различных форматов."""
     background_tasks.add_task(run_multi_format_processing_from_config)
-    return RedirectResponse(url=f"/api/admin/settings?msg=processing_started", status_code=303)
+    return RedirectResponse(url=f"/settings?msg=processing_started", status_code=303)
