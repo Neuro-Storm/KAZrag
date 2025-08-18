@@ -73,7 +73,7 @@ async def root():
 @app.get("/settings", response_class=RedirectResponse)
 async def settings_redirect():
     """Маршрут для настроек - перенаправляет на админку"""
-    return RedirectResponse(url="/api/admin/admin/settings")
+    return RedirectResponse(url="/api/admin/settings")
 
 if __name__ == "__main__":
     logger.info("Начало запуска приложения")
