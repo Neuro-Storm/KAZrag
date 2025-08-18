@@ -2,18 +2,39 @@
 
 import uvicorn
 import logging
+import sys
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
+# Централизованная настройка логирования
+import os
+LOG_DIR = Path("logs")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(str(LOG_DIR / 'app.log'), encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+# Reduce verbosity of the file watcher to avoid log-change loops
+logging.getLogger('watchfiles').setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 # Загружаем переменные окружения из .env файла
 load_dotenv()
+
+# Проверяем и создаем директорию для кэша моделей fastembed, если она задана
+fastembed_cache_dir = os.environ.get('FASTEMBED_CACHE_DIR')
+if fastembed_cache_dir:
+    fastembed_cache_path = Path(fastembed_cache_dir)
+    fastembed_cache_path.mkdir(parents=True, exist_ok=True)
+    logger.info(f"FastEmbed cache directory: {fastembed_cache_path.absolute()}")
 
 # Импорт приложений
 from web.search_app import app as search_app
@@ -23,10 +44,12 @@ from web.admin_app import app as admin_app
 app = FastAPI(title="KAZrag", description="Поисковая система на основе векторного поиска")
 
 # Добавление CORS middleware
-# Получаем разрешенные источники из переменной окружения или используем "*"
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "*")
-if allowed_origins != "*":
-    allowed_origins = allowed_origins.split(",")
+# Нормализуем ALLOWED_ORIGINS: '*' -> ['*'], иначе список origin'ов разделённых запятыми
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "*") or "*"
+if allowed_origins_env.strip() == "*":
+    allowed_origins = ["*"]
+else:
+    allowed_origins = [o.strip() for o in allowed_origins_env.split(',') if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,
@@ -53,15 +76,28 @@ async def settings_redirect():
     return RedirectResponse(url="/api/admin/settings")
 
 if __name__ == "__main__":
+    logger.info("Начало запуска приложения")
     # Загрузка конфигурации при запуске с проверкой Qdrant
     try:
         from config.settings import load_config
+        logger.info("Загрузка конфигурации")
         load_config()
+        logger.info("Конфигурация успешно загружена")
     except RuntimeError as e:
         logger.error(f"Ошибка при загрузке конфигурации: {e}")
-        exit(1)
+        sys.exit(1)
     # Запуск сервера
     try:
-        uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+        logger.info("Запуск сервера на http://127.0.0.1:8000")
+        # Exclude common log file patterns and logs directory from reload watcher
+        uvicorn.run(
+            "main:app",
+            host="127.0.0.1",
+            port=8000,
+            reload=True,
+            reload_excludes=["*.log", "logs/*", "*.log.*", "*.log~"]
+        )
+        logger.info("Сервер запущен")
     except Exception as e:
-        logger.error(f"Ошибка при запуске сервера: {e}")
+        logger.exception(f"Ошибка при запуске сервера: {e}")
+        sys.exit(1)
