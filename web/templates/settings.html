@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Настройки</title>
-    <link rel="stylesheet" href="https://unpkg.com/simpledotcss/simple.min.css">
+    <link rel="stylesheet" href="/static/simple.min.css">
     <style>
         .status-msg { padding: 1rem; margin-bottom: 1rem; border-radius: 4px; }
         .success { background-color: #d4edda; color: #155724; }
@@ -17,6 +17,15 @@
         .grid-4col { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; }
         .form-section { border: 1px solid #ccc; border-radius: 4px; padding: 1rem; margin-bottom: 1rem; }
         .form-section h3 { margin-top: 0; }
+        .progress { display: none; padding: 1rem; margin: 1rem 0; background-color: #f0f0f0; border-radius: 4px; }
+        .spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 10px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .collapsible { cursor: pointer; padding: 10px; background-color: #f1f1f1; border: none; text-align: left; outline: none; }
+        .content { padding: 0 18px; display: none; overflow: hidden; background-color: #f9f9f9; }
+        .form-info { background-color: #e9ecef; padding: 1rem; border-radius: 4px; margin-bottom: 1rem; }
+        .form-info p { margin: 0 0 0.5rem 0; }
+        .form-info ul { margin: 0.5rem 0; padding-left: 1.5rem; }
+        .help-text { font-size: 0.9em; color: #6c757d; margin: 0.5rem 0 0 0; }
     </style>
 </head>
 <body>
@@ -27,7 +36,7 @@
     <main>
         {% if status or delete_status %}
             {% set msg = status or delete_status %}
-            <div class="status-msg {{ 'success' if 'success' in msg or 'saved' in msg or 'indexed' in msg or 'deleted_' in msg or 'pdfs_processed' in msg else 'error' if 'error' in msg or 'fail' in msg or 'no_index_type' in msg or 'delete_error' in msg or 'pdf_processing_error' in msg else 'info' }}">
+            <div class="status-msg {{ 'success' if 'success' in msg or 'saved' in msg or 'indexed' in msg or 'deleted_' in msg or 'pdfs_processed' in msg or 'files_processed' in msg else 'error' if 'error' in msg or 'fail' in msg or 'no_index_type' in msg or 'delete_error' in msg or 'pdf_processing_error' in msg or 'file_processing_error' in msg else 'info' }}">
                 {% if msg == 'saved' %}Настройки сохранены.{% endif %}
                 {% if msg == 'indexed_successfully' %}Индексация успешно завершена!{% endif %}
                 {% if msg == 'indexed_successfully_no_docs' %}Индексация завершена. Не найдено .txt/.md файлов для обработки.{% endif %}
@@ -37,6 +46,10 @@
                 {% if msg == 'error_no_collection_selected' %}Ошибка: Не выбрана коллекция для удаления.{% endif %}
                 {% if 'pdfs_processed_successfully' in msg %}PDF файлы успешно обработаны!{% endif %}
                 {% if 'pdf_processing_error' in msg %}Ошибка при обработке PDF. Проверьте логи терминала. Сообщение: {{ msg }}{% endif %}
+                {% if 'files_processed_successfully' in msg %}Файлы успешно обработаны!{% endif %}
+                {% if 'file_processing_error' in msg %}Ошибка при обработке файлов. Проверьте логи терминала. Сообщение: {{ msg }}{% endif %}
+                {% if msg == 'indexing_started' %}Индексация запущена в фоновом режиме.{% endif %}
+                {% if msg == 'processing_started' %}Обработка запущена в фоновом режиме.{% endif %}
             </div>
         {% endif %}
         
@@ -85,9 +98,47 @@
                 
                 <fieldset>
                     <legend>Типы векторов для индексации</legend>
-                    <input type="checkbox" id="use_dense" name="use_dense" value="True" {% if config.use_dense_vectors %}checked{% endif %}>
-                    <label for="use_dense">Плотные векторы (для семантического поиска)</label><br>
+                    <input type="radio" id="indexing_dense" name="indexing_type" value="dense" {% if config.index_dense and not config.index_hybrid %}checked{% endif %}>
+                    <label for="indexing_dense">Плотные векторы (dense)</label><br>
+                    <input type="radio" id="indexing_sparse" name="indexing_type" value="sparse" {% if config.index_bm25 and not config.index_hybrid %}checked{% endif %}>
+                    <label for="indexing_sparse">Разреженные векторы (BM25)</label><br>
+                    <input type="radio" id="indexing_hybrid" name="indexing_type" value="hybrid" {% if config.index_hybrid %}checked{% endif %}>
+                    <label for="indexing_hybrid">Гибридный режим (dense + BM25)</label><br>
+                    <!-- Hidden fields to store individual flags -->
+                    <input type="hidden" id="index_dense" name="index_dense" value="{{ 'True' if config.index_dense else 'False' }}">
+                    <input type="hidden" id="index_bm25" name="index_bm25" value="{{ 'True' if config.index_bm25 else 'False' }}">
+                    <input type="hidden" id="index_hybrid" name="index_hybrid" value="{{ 'True' if config.index_hybrid else 'False' }}">
+                    <!-- Legacy fields kept for compatibility -->
+                    <input type="hidden" id="use_dense" name="use_dense" value="{{ 'True' if config.use_dense_vectors else 'False' }}">
+                    <input type="hidden" id="use_hybrid" name="use_hybrid" value="{{ 'True' if config.use_hybrid else 'False' }}">
                 </fieldset>
+                
+                <script>
+                    // Обработчики событий для радиокнопок индексации
+                    document.getElementById('indexing_dense').addEventListener('change', function() {
+                        if (this.checked) {
+                            document.getElementById('index_dense').value = 'True';
+                            document.getElementById('index_bm25').value = 'False';
+                            document.getElementById('index_hybrid').value = 'False';
+                        }
+                    });
+                    
+                    document.getElementById('indexing_sparse').addEventListener('change', function() {
+                        if (this.checked) {
+                            document.getElementById('index_dense').value = 'False';
+                            document.getElementById('index_bm25').value = 'True';
+                            document.getElementById('index_hybrid').value = 'False';
+                        }
+                    });
+                    
+                    document.getElementById('indexing_hybrid').addEventListener('change', function() {
+                        if (this.checked) {
+                            document.getElementById('index_dense').value = 'True';
+                            document.getElementById('index_bm25').value = 'True';  // Гибрид подразумевает sparse
+                            document.getElementById('index_hybrid').value = 'True';
+                        }
+                    });
+                </script>
                 
                 <fieldset>
                     <legend>Устройство для индексации</legend>
@@ -178,6 +229,115 @@
             </div>
         </form>
         
+        <!-- Секция дополнительных настроек -->
+        <button type="button" id="advanced-settings-button" onclick="toggleAdvancedSettings()">Дополнительные настройки</button>
+        <div class="content" id="advanced-settings-content">
+            <form action="/api/admin/update-settings" method="post">
+                <input type="hidden" name="action" value="save_advanced_settings">
+                
+                <div class="form-info">
+                    <p><strong>Переменные окружения:</strong> Некоторые настройки задаются через переменные окружения в файле <code>.env</code>:</p>
+                    <ul>
+                        <li><code>ADMIN_API_KEY</code> - API ключ для защиты админки</li>
+                        <li><code>FASTEMBED_CACHE_DIR</code> - Директория кэша моделей BM25 (по умолчанию <code>./models/fastembed_cache</code>)</li>
+                    </ul>
+                </div>
+                
+                <div class="form-section">
+                    <h3>Настройки кэширования</h3>
+                    
+                    <div class="grid-3col">
+                        <div>
+                            <label for="config_cache_ttl">TTL кэша конфигурации (сек)</label>
+                            <input type="number" id="config_cache_ttl" name="config_cache_ttl" value="{{ config.config_cache_ttl }}" min="1" required>
+                        </div>
+                        <div>
+                            <label for="qdrant_client_cache_ttl">TTL кэша клиента Qdrant (сек)</label>
+                            <input type="number" id="qdrant_client_cache_ttl" name="qdrant_client_cache_ttl" value="{{ config.qdrant_client_cache_ttl }}" min="1" required>
+                        </div>
+                        <div>
+                            <label for="collections_cache_ttl">TTL кэша коллекций (сек)</label>
+                            <input type="number" id="collections_cache_ttl" name="collections_cache_ttl" value="{{ config.collections_cache_ttl }}" min="1" required>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-section">
+                    <h3>Настройки GGUF моделей</h3>
+                    
+                    <label for="gguf_model_n_ctx">Размер контекста для GGUF моделей</label>
+                    <input type="number" id="gguf_model_n_ctx" name="gguf_model_n_ctx" value="{{ config.gguf_model_n_ctx }}" min="1" required>
+                </div>
+                
+                <div class="form-section">
+                    <h3>Настройки поиска</h3>
+                    
+                    <label for="search_default_k">Количество результатов поиска по умолчанию</label>
+                    <input type="number" id="search_default_k" name="search_default_k" value="{{ config.search_default_k }}" min="1" required>
+                </div>
+                
+                <div class="form-section">
+                    <h3>Настройки подключения к Qdrant</h3>
+                    
+                    <div class="grid-2col">
+                        <div>
+                            <label for="qdrant_url">URL Qdrant</label>
+                            <input type="text" id="qdrant_url" name="qdrant_url" value="{{ config.qdrant_url }}" required>
+                        </div>
+                        <div>
+                            <label for="qdrant_retry_attempts">Количество попыток повтора</label>
+                            <input type="number" id="qdrant_retry_attempts" name="qdrant_retry_attempts" value="{{ config.qdrant_retry_attempts }}" min="1" required>
+                        </div>
+                    </div>
+                    
+                    <label for="qdrant_retry_wait_time">Время ожидания между попытками (сек)</label>
+                    <input type="number" id="qdrant_retry_wait_time" name="qdrant_retry_wait_time" value="{{ config.qdrant_retry_wait_time }}" min="1" required>
+                </div>
+                
+                <div class="form-section">
+                    <h3>Настройки индексации документов</h3>
+                    
+                    <div class="grid-2col">
+                        <div>
+                            <label for="memory_threshold">Порог памяти (байт)</label>
+                            <input type="number" id="memory_threshold" name="memory_threshold" value="{{ config.memory_threshold }}" min="1" required>
+                        </div>
+                        <div>
+                            <label for="indexing_default_batch_size">Размер батча по умолчанию</label>
+                            <input type="number" id="indexing_default_batch_size" name="indexing_default_batch_size" value="{{ config.indexing_default_batch_size }}" min="1" required>
+                        </div>
+                    </div>
+                    
+                    <label for="sparse_embedding">Модель для sparse embedding</label>
+                    <input type="text" id="sparse_embedding" name="sparse_embedding" value="{{ config.sparse_embedding }}" required>
+                    
+                    <div class="form-info">
+                        <p><strong>Директория кэша моделей sparse embedding:</strong> 
+                           <span id="fastembed_cache_dir_display">
+                               {% if fastembed_cache_dir %}
+                                   {{ fastembed_cache_dir }}
+                               {% else %}
+                                   Не задана (используется директория по умолчанию)
+                               {% endif %}
+                           </span>
+                        </p>
+                        <p class="help-text">
+                            Директория кэша моделей BM25 и других sparse моделей задается через переменную окружения FASTEMBED_CACHE_DIR в файле .env.
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="form-section">
+                    <h3>Настройки MinerU (дополнительные)</h3>
+                    
+                    <label for="mineru_subprocess_timeout">Таймаут subprocess вызова mineru (сек)</label>
+                    <input type="number" id="mineru_subprocess_timeout" name="mineru_subprocess_timeout" value="{{ config.mineru_subprocess_timeout }}" min="1" required>
+                </div>
+                
+                <button type="submit" name="action" value="save_advanced_settings">Сохранить дополнительные настройки</button>
+            </form>
+        </div>
+        
         <hr>
         
         <h2>Управление коллекциями</h2>
@@ -200,18 +360,103 @@
             <div>
                 <h3>Обработка PDF</h3>
                 <p>Преобразовать PDF из <strong>{{ config.mineru_input_pdf_dir }}</strong> в Markdown и сохранить в <strong>{{ config.mineru_output_md_dir }}</strong>.</p>
-                <form action="/api/admin/process-pdfs" method="post">
-                    <button type="submit">Запустить обработку PDF (Subprocess)</button>
+                <form action="/api/admin/process-pdfs" method="post" id="process-pdfs-form" onsubmit="handleProcessPdfsSubmit()">
+                    <button type="submit" id="process-pdfs-btn">Запустить обработку PDF (Subprocess)</button>
                 </form>
+                <div id="process-pdfs-progress" class="progress">
+                    <span class="spinner"></span> Обработка PDF запущена в фоновом режиме...
+                </div>
+
+                <h3>Обработка файлов различных форматов</h3>
+                <p>Преобразовать файлы различных форматов из <strong>{{ config.mineru_input_pdf_dir }}</strong> в Markdown и сохранить в <strong>{{ config.mineru_output_md_dir }}</strong>.</p>
+                <form action="/api/admin/process-files" method="post" id="process-files-form" onsubmit="handleProcessFilesSubmit()">
+                    <button type="submit" id="process-files-btn">Запустить обработку файлов</button>
+                </form>
+                <div id="process-files-progress" class="progress">
+                    <span class="spinner"></span> Обработка файлов запущена в фоновом режиме...
+                </div>
             </div>
             <div>
                 <h3>Управление индексом</h3>
                 <p>Проиндексировать данные из <strong>{{ config.folder_path }}</strong> в коллекцию <strong>{{ config.collection_name }}</strong>.</p>
-                <form action="/api/admin/run-indexing" method="post">
-                    <button type="submit">Запустить индексацию</button>
+                <form action="/api/admin/run-indexing" method="post" id="run-indexing-form" onsubmit="handleRunIndexingSubmit()">
+                    <button type="submit" id="run-indexing-btn">Запустить индексацию</button>
                 </form>
+                <div id="run-indexing-progress" class="progress">
+                    <span class="spinner"></span> Индексация запущена в фоновом режиме...
+                </div>
             </div>
         </div>
     </main>
+    
+    <script>
+        // Обработчики событий для форм с индикаторами прогресса
+        function handleProcessPdfsSubmit() {
+            try {
+                document.getElementById('process-pdfs-btn').disabled = true;
+                document.getElementById('process-pdfs-progress').style.display = 'block';
+            } catch (e) {
+                console.log("Error in handleProcessPdfsSubmit:", e);
+            }
+        }
+        
+        function handleRunIndexingSubmit() {
+            try {
+                document.getElementById('run-indexing-btn').disabled = true;
+                document.getElementById('run-indexing-progress').style.display = 'block';
+            } catch (e) {
+                console.log("Error in handleRunIndexingSubmit:", e);
+            }
+        }
+        
+        function handleProcessFilesSubmit() {
+            try {
+                document.getElementById('process-files-btn').disabled = true;
+                document.getElementById('process-files-progress').style.display = 'block';
+            } catch (e) {
+                console.log("Error in handleProcessFilesSubmit:", e);
+            }
+        }
+        
+        // Простой обработчик для кнопки дополнительных настроек
+        function toggleAdvancedSettings() {
+            try {
+                var button = document.getElementById('advanced-settings-button');
+                var content = document.getElementById('advanced-settings-content');
+                
+                if (button && content) {
+                    button.classList.toggle("active");
+                    if (content.style.display === "block") {
+                        content.style.display = "none";
+                    } else {
+                        content.style.display = "block";
+                    }
+                }
+            } catch (e) {
+                console.log("Error in toggleAdvancedSettings:", e);
+            }
+        }
+        
+        // Простой обработчик для чекбокса index_hybrid
+        function setupIndexHybridHandler() {
+            try {
+                var checkbox = document.getElementById('index_hybrid');
+                if (checkbox) {
+                    checkbox.addEventListener('change', function() {
+                        if (this.checked) {
+                            document.getElementById('index_dense').checked = true;
+                        }
+                    });
+                }
+            } catch (e) {
+                console.log("Error setting up index_hybrid handler:", e);
+            }
+        }
+        
+        // Инициализация обработчиков после загрузки DOM
+        document.addEventListener('DOMContentLoaded', function() {
+            setupIndexHybridHandler();
+        });
+    </script>
 </body>
 </html>

@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Поиск по документам</title>
-    <link rel="stylesheet" href="https://unpkg.com/simpledotcss/simple.min.css">
+    <link rel="stylesheet" href="/static/simple.min.css">
 </head>
 <body>
     <header>
@@ -31,8 +31,17 @@
             </div>
             <label for="query">Поисковый запрос:</label>
             <input type="text" name="query" id="query" placeholder="Введите ваш запрос..." value="{{ query or '' }}" required>
-            <label for="k">Количество результатов:</label>
-            <input type="number" id="k" name="k" min="1" max="50" value="{{ k or 5 }}">
+            <fieldset>
+                <legend>Тип поиска</legend>
+                <input type="radio" id="search_dense" name="search_type" value="dense" {% if not hybrid and selected_search_type != 'sparse' %}checked{% endif %}>
+                <label for="search_dense">Плотные векторы (dense)</label><br>
+                <input type="radio" id="search_sparse" name="search_type" value="sparse" {% if selected_search_type == 'sparse' %}checked{% endif %}>
+                <label for="search_sparse">Разреженные векторы (BM25)</label><br>
+                <input type="radio" id="search_hybrid" name="search_type" value="hybrid" {% if hybrid %}checked{% endif %}>
+                <label for="search_hybrid">Гибридный режим (dense + BM25)</label><br>
+                <!-- Hidden field to store hybrid flag for backward compatibility -->
+                <input type="hidden" id="hybrid" name="hybrid" value="{{ 'True' if hybrid else 'False' }}">
+            </fieldset>
             <button type="submit">Найти</button>
         </form>
         {% if results %}
@@ -47,8 +56,28 @@
              <p>По вашему запросу ничего не найдено в коллекции '{{ selected_collection }}'.</p>
         {% endif %}
         {% if error %}
-            <p style="color: red;">Ошибка: {{ error }}</p>
+            <p style=\"color: red;\">Ошибка: {{ error }}</p>
         {% endif %}
     </main>
+    <script>
+        // Обработчики событий для радиокнопок поиска
+        document.getElementById('search_dense').addEventListener('change', function() {
+            if (this.checked) {
+                document.getElementById('hybrid').value = 'False';
+            }
+        });
+        
+        document.getElementById('search_sparse').addEventListener('change', function() {
+            if (this.checked) {
+                document.getElementById('hybrid').value = 'False';
+            }
+        });
+        
+        document.getElementById('search_hybrid').addEventListener('change', function() {
+            if (this.checked) {
+                document.getElementById('hybrid').value = 'True';
+            }
+        });
+    </script>
 </body>
 </html>

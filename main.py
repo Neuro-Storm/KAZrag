@@ -3,15 +3,19 @@
 import uvicorn
 import logging
 import sys
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+# Импорт приложений
+from web.search_app import app as search_app
+from web.admin_app import app as admin_app
+
 # Централизованная настройка логирования
-import os
 LOG_DIR = Path("logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
@@ -36,10 +40,6 @@ if fastembed_cache_dir:
     fastembed_cache_path.mkdir(parents=True, exist_ok=True)
     logger.info(f"FastEmbed cache directory: {fastembed_cache_path.absolute()}")
 
-# Импорт приложений
-from web.search_app import app as search_app
-from web.admin_app import app as admin_app
-
 # Создание основного приложения FastAPI
 app = FastAPI(title="KAZrag", description="Поисковая система на основе векторного поиска")
 
@@ -63,6 +63,9 @@ app.add_middleware(
 app.mount("/api/search", search_app)
 app.mount("/api/admin", admin_app)
 
+# Добавляем обслуживание статических файлов
+app.mount("/static", StaticFiles(directory="web/static"), name="static")
+
 # Добавляем корневой маршрут для перенаправления на страницу поиска
 @app.get("/", response_class=RedirectResponse)
 async def root():
@@ -73,7 +76,7 @@ async def root():
 @app.get("/settings", response_class=RedirectResponse)
 async def settings_redirect():
     """Маршрут для настроек - перенаправляет на админку"""
-    return RedirectResponse(url="/api/admin/")
+    return RedirectResponse(url="/api/admin/settings")
 
 if __name__ == "__main__":
     logger.info("Начало запуска приложения")

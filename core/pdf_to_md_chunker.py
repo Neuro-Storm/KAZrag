@@ -22,15 +22,6 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('app.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
 
 def setup_env(model_source: str, models_dir: Optional[str], enable_formula_parsing: bool, enable_table_parsing: bool) -> dict:
@@ -74,7 +65,6 @@ def run_subprocess(pdf_file: Path, temp_output_dir: Path, backend: str, method: 
     Returns:
         subprocess.CompletedProcess: Результат выполнения subprocess.
     """
-    pdf_stem = pdf_file.stem
     logger.info(f"Обработка файла (Subprocess): {pdf_file.name}")
 
     # Формирование команды для вызова mineru с указанными параметрами
@@ -103,7 +93,7 @@ def run_subprocess(pdf_file: Path, temp_output_dir: Path, backend: str, method: 
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        timeout=600
+        timeout=600  # Фиксированный таймаут 10 минут
     )
 
 
@@ -248,22 +238,19 @@ def process_pdfs_and_chunk(
                 continue
 
         except subprocess.TimeoutExpired:
-            logger.error(f"Ошибка: Таймаут при обработке файла {pdf_file.name}.")
+            logger.exception(f"Ошибка: Таймаут при обработке файла {pdf_file.name}.")
             continue
         except FileNotFoundError as e:
             if "mineru" in str(e).lower() or "[winerror 2]" in str(e).lower() or "No such file or directory" in str(e):
-                 # raise RuntimeError("Команда 'mineru' не найдена. Убедитесь, что пакет 'mineru' установлен.")
-                 # Временно оставляем print для совместимости
-                 logger.error(f"Ошибка: Команда 'mineru' не найдена. Убедитесь, что пакет 'mineru' установлен.")
-                 logger.error(f"Подробности ошибки: {e}")
+                 logger.exception(f"Команда 'mineru' не найдена. Убедитесь, что пакет 'mineru' установлен: {e}")
             else:
-                 logger.error(f"Ошибка FileNotFoundError при обработке файла {pdf_file.name}: {e}")
-            # break  # Убираем break, чтобы продолжить обработку других файлов
-            continue  # Продолжаем обработку других файлов
+                 logger.exception(f"Ошибка FileNotFoundError при обработке файла {pdf_file.name}: {e}")
+            continue
+        except subprocess.CalledProcessError as e:
+            logger.exception(f"Ошибка при вызове MinerU для файла {pdf_file.name}: {e}")
+            continue
         except Exception as e:
-            logger.error(f"Неожиданная ошибка при обработке файла {pdf_file.name}: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.exception(f"Неожиданная ошибка при обработке файла {pdf_file.name}: {e}")
             continue
         finally:
             # Удаляем временную директорию в любом случае

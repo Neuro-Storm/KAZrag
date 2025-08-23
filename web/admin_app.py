@@ -1,6 +1,5 @@
 """FastAPI приложение для настроек и управления системой."""
 
-import traceback
 import os
 import logging
 from typing import Optional
@@ -10,12 +9,16 @@ from fastapi.templating import Jinja2Templates
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 # Qdrant client provided via dependency injection (core.dependencies.get_client)
 from dotenv import load_dotenv
+from pathlib import Path
+
+from config.settings import save_config, Config
+from core.indexer import run_indexing_logic
+from core.file_converter import run_pdf_processing_from_config, run_multi_format_processing_from_config
+from core.qdrant_collections import get_cached_collections, refresh_collections_cache
+from core.dependencies import get_config, get_client
 
 # Загружаем переменные окружения из .env файла
 load_dotenv()
-
-import os
-from pathlib import Path
 
 # Проверяем и создаем директорию для кэша моделей fastembed, если она задана
 fastembed_cache_dir = os.environ.get('FASTEMBED_CACHE_DIR')
@@ -23,13 +26,17 @@ if fastembed_cache_dir:
     fastembed_cache_path = Path(fastembed_cache_dir)
     fastembed_cache_path.mkdir(parents=True, exist_ok=True)
 
-logger = logging.getLogger(__name__)
+# Инициализация FastAPI приложения и шаблонов
+app = FastAPI()
+templates = Jinja2Templates(directory="web/templates")
 
-from config.settings import load_config, save_config, Config
-from core.indexer import run_indexing_logic
-from core.file_converter import run_pdf_processing_from_config
-from core.qdrant_collections import get_cached_collections, refresh_collections_cache
-from core.dependencies import get_config, get_client
+# Настройка HTTP Basic Authentication
+security = HTTPBasic()
+
+# Получаем API ключ из переменной окружения
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
+
+logger = logging.getLogger(__name__)
 
 # Инициализация FastAPI приложения и шаблонов
 app = FastAPI()
@@ -107,8 +114,8 @@ def update_index_settings(form_data: dict, config: Config):
 
     # Сброс кэшa embedder'а при смене модели или устройства
     if model_changed or device_changed:
-        from core.embeddings import _dense_embedder_cache
-        _dense_embedder_cache.clear()
+        from core.embeddings import clear_embedder_cache
+        clear_embedder_cache()
         # Сброс кэша text_splitter при смене chunk_size или chunk_overlap
         from core.chunker import get_text_splitter
         get_text_splitter.cache_clear()
@@ -224,7 +231,7 @@ def update_advanced_settings(form_data: dict, config: Config):
             raise HTTPException(400, detail="Неверный таймаут subprocess вызова mineru")
 
 
-async def verify_admin_access(credentials: HTTPBasicCredentials = Depends(security)):
+async def verify_admin_access_from_form(credentials: HTTPBasicCredentials = Depends(security)):
     """Проверяет учетные данные для доступа к админке."""
     # Если API ключ не установлен в .env, разрешаем доступ без аутентификации
     if not ADMIN_API_KEY:
@@ -249,7 +256,7 @@ async def verify_admin_access(credentials: HTTPBasicCredentials = Depends(securi
 
 
 @app.get("/settings", response_class=HTMLResponse)
-async def get_settings_page(request: Request, status: str = None, username: str = Depends(verify_admin_access), config: Config = Depends(get_config), client = Depends(get_client)):
+async def get_settings_page(request: Request, status: str = None, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config), client = Depends(get_client)):
     """Отображает страницу настроек."""
     logger.debug(f"Загружена конфигурация: {config.dict()}")
     collections = get_cached_collections(client=client)
@@ -265,7 +272,7 @@ async def get_settings_page(request: Request, status: str = None, username: str 
 
 
 @app.post("/settings/delete-collection", response_class=RedirectResponse)
-async def delete_collection(request: Request, collection_name: str = Form(...), username: str = Depends(verify_admin_access), config: Config = Depends(get_config), client = Depends(get_client)):
+async def delete_collection(request: Request, collection_name: str = Form(...), username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config), client = Depends(get_client)):
     """Удаляет указанную коллекцию из Qdrant."""
     status_msg = ""
     try:
@@ -277,7 +284,7 @@ async def delete_collection(request: Request, collection_name: str = Form(...), 
             status_msg = f"deleted_{collection_name}"
     except Exception as e:
         logger.exception(f"Ошибка при удалении коллекции '{collection_name}': {e}")
-        status_msg = f"delete_error"
+        status_msg = "delete_error"
     return RedirectResponse(url=f"/settings?status={status_msg}", status_code=303)
 
 
@@ -327,13 +334,12 @@ async def update_settings(
     mineru_subprocess_timeout: str = Form(None),
     # --- Новое поле для определения действия ---
     action: str = Form(...), # Это поле будет определять, какие настройки сохранять
-    username: str = Depends(verify_admin_access),
+    username: str = Depends(verify_admin_access_from_form),
     config: Config = Depends(get_config)
 ):
     """Обновляет настройки приложения."""
     
     # Импортируем кэш для сброса при смене модели или устройства
-    from core.embeddings import _dense_embedder_cache
     
     # Собираем данные формы в словарь
     form_data = {
@@ -425,48 +431,27 @@ async def update_settings(
 
 
 @app.post("/run-indexing", response_class=RedirectResponse)
-async def run_indexing(background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access), config: Config = Depends(get_config), client = Depends(get_client)):
+async def run_indexing(background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config), client = Depends(get_client)):
     """Запускает процесс индексации документов."""
     background_tasks.add_task(run_indexing_logic, client=client)
     # success, status = await run_indexing_logic(client=client)
     # if success and "successfully" in status:
     #     await refresh_collections_cache(client=client)  # Обновляем кэш после индексации
-    return RedirectResponse(url=f"/settings?status=indexing_started", status_code=303)
+    return RedirectResponse(url="/settings?status=indexing_started", status_code=303)
 
-
-from fastapi import APIRouter, Request, Form, Depends, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse
-import logging
-from pathlib import Path
-import os
-import shutil
-from typing import Dict, Any
-
-from config.settings import load_config, Config, save_config
-from core.indexer import run_indexing_from_config
-from core.file_converter import run_pdf_processing_from_config, run_multi_format_processing_from_config
-from core.qdrant_collections import recreate_collection_from_config
-from core.dependencies import get_config, verify_admin_access
-from core.constants import TEMPLATES
-
-logger = logging.getLogger(__name__)
-
-app = APIRouter(tags=["admin"])
-
-# ... existing code ...
 
 # Эндпоинт для обработки PDF через MinerU
 @app.post("/process-pdfs", response_class=RedirectResponse)
-async def process_pdfs_endpoint(background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access), config: Config = Depends(get_config)):
+async def process_pdfs_endpoint(background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config)):
     """Запускает процесс обработки PDF файлов."""
     background_tasks.add_task(run_pdf_processing_from_config)
     # success, status_msg = await run_pdf_processing_from_config()
-    return RedirectResponse(url=f"/settings?msg=processing_started", status_code=303)
+    return RedirectResponse(url="/settings?msg=processing_started", status_code=303)
 
 
 # Эндпоинт для обработки файлов различных форматов
 @app.post("/process-files", response_class=RedirectResponse)
-async def process_files_endpoint(background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access), config: Config = Depends(get_config)):
+async def process_files_endpoint(background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config)):
     """Запускает процесс обработки файлов различных форматов."""
     background_tasks.add_task(run_multi_format_processing_from_config)
-    return RedirectResponse(url=f"/settings?msg=processing_started", status_code=303)
+    return RedirectResponse(url="/settings?msg=processing_started", status_code=303)

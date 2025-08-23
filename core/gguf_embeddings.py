@@ -1,27 +1,17 @@
 """Модуль для работы с GGUF эмбеддерами."""
 
-import numpy as np
 import logging
 from typing import List
 from langchain_core.embeddings import Embeddings
 from config.settings import load_config, Config
 import os
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('app.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
 
 # Импортируем llama_cpp для правильной работы тестов
 try:
-    import llama_cpp
-    LLAMA_CPP_AVAILABLE = True
+    import importlib.util
+    LLAMA_CPP_AVAILABLE = importlib.util.find_spec("llama_cpp") is not None
 except ImportError:
     LLAMA_CPP_AVAILABLE = False
 
@@ -39,6 +29,9 @@ class GGUFEmbeddings(Embeddings):
         """
         try:
             from llama_cpp import Llama
+            
+            # Загружаем конфигурацию для получения параметров
+            config = load_config()
             
             # Проверяем, существует ли файл модели
             if not os.path.exists(model_path):
@@ -74,7 +67,7 @@ class GGUFEmbeddings(Embeddings):
                 self.model = Llama(
                     model_path=model_path,
                     n_gpu_layers=n_gpu_layers,  # Количество слоев на GPU (-1 для всех слоев)
-                    n_ctx=4096,  # Размер контекста
+                    n_ctx=config.gguf_model_n_ctx,  # Размер контекста из конфигурации
                     embedding=True,  # Включаем режим эмбеддингов
                     verbose=False  # Отключаем подробный вывод
                 )
@@ -84,7 +77,7 @@ class GGUFEmbeddings(Embeddings):
                 self.model = Llama(
                     model_path=model_path,
                     n_gpu_layers=n_gpu_layers,  # Количество слоев на GPU (-1 для всех слоев)
-                    n_ctx=4096,  # Размер контекста
+                    n_ctx=config.gguf_model_n_ctx,  # Размер контекста из конфигурации
                     embedding=True,  # Включаем режим эмбеддингов
                     verbose=False  # Отключаем подробный вывод
                 )
@@ -96,12 +89,11 @@ class GGUFEmbeddings(Embeddings):
             
             self.device = device
         except ImportError:
-            raise ImportError(
-                "Не удалось импортировать llama_cpp. "
-                "Установите его с помощью `pip install llama-cpp-python`."
-            )
+            logger.exception("Не удалось импортировать llama_cpp. Установите его с помощью `pip install llama-cpp-python`.")
+            raise
         except Exception as e:
-            raise Exception(f"Ошибка при загрузке GGUF модели: {e}")
+            logger.exception(f"Ошибка при загрузке GGUF модели: {e}")
+            raise
     
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """Генерация эмбеддингов для списка документов."""

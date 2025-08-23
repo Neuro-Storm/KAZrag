@@ -2,7 +2,7 @@
 
 import logging
 import time
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends
 from config.settings import load_config, Config
 from tenacity import retry, stop_after_attempt, wait_fixed
 from core.constants import RETRY_ATTEMPTS, RETRY_WAIT_TIME

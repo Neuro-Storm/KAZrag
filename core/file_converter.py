@@ -3,20 +3,13 @@
 import logging
 from typing import Tuple
 from config.settings import load_config, Config
-# Импорт основной функции обработки из pdf_to_md_chunker
+# Импорт основной функции обработки из pdf_to_md_chunker (для обратной совместимости)
 from .pdf_to_md_chunker import process_pdfs_and_chunk
 # Импорт функции get_device из embeddings, чтобы не дублировать код
 from core.embeddings import get_device
+# Импорт нового мультиформатного конвертера
+from .multi_format_converter import convert_files_to_md
 
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('app.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
 logger = logging.getLogger(__name__)
 
 
@@ -45,7 +38,28 @@ def run_pdf_processing_from_config() -> Tuple[bool, str]:
         )
         return True, "pdfs_processed_successfully"
     except Exception as e:
-        logger.error(f"Ошибка при обработке PDF: {e}")
-        import traceback
-        traceback.print_exc()
-        return False, f"pdf_processing_error_{str(e).replace(' ', '_')}"
+        logger.exception(f"Ошибка при обработке PDF: {e}")
+        return False, "pdf_processing_error"
+
+
+def run_multi_format_processing_from_config() -> Tuple[bool, str]:
+    """
+    Запускает обработку файлов различных форматов, используя настройки из config.json.
+    
+    Returns:
+        Tuple[bool, str]: (успех, статус)
+    """
+    config: Config = load_config()
+    try:
+        # Вызов функции обработки для всех форматов
+        success, status = convert_files_to_md(
+            input_dir=config.mineru_input_pdf_dir,  # Используем ту же директорию для всех форматов
+            output_dir=config.mineru_output_md_dir
+        )
+        if success:
+            return True, f"files_processed_successfully_{status}"
+        else:
+            return False, status
+    except Exception as e:
+        logger.exception(f"Ошибка при обработке файлов: {e}")
+        return False, "file_processing_error"

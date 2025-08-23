@@ -1,16 +1,27 @@
 
-fastapi>=0.100.0,<0.104.0
-uvicorn[standard]
-langchain>=0.2.0
-langchain-huggingface
-langchain-qdrant>=0.1.0
-langchain-community
-langchain-core
-qdrant-client>=1.9.0
-torch
-transformers
-jinja2
-python-multipart
-scipy
-mineru # Добавлено
-python-dotenv # Для работы с переменными окружения
+fastapi==0.116.1
+uvicorn[standard]==0.32.0
+langchain==0.3.27
+langchain-huggingface==0.1.0
+langchain-qdrant==0.2.0
+langchain-community==0.3.28
+langchain-core==0.3.84
+qdrant-client[fastembed]==1.15.1
+torch==2.5.1
+transformers==4.45.2
+jinja2==3.1.4
+python-multipart==0.0.12
+scipy==1.14.1
+mineru==0.1.0
+python-dotenv==1.0.1
+psutil>=5.9.0
+pydantic>=2.0.0
+tenacity==9.0.0
+fastembed==0.7.1
+python-docx>=0.8.11
+html2text>=2020.1.16
+python-pptx>=0.6.21
+pandas>=1.5.3
+openpyxl>=3.1.2
+tabulate>=0.9.0
+

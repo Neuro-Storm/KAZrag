@@ -64,7 +64,13 @@ data_to_index/
 data_to_index1/
 
 # Models
-models/
+# Исключаем только кэш fastembed, но не другие файлы в папке models
+models/fastembed_cache/
+# Большие бинарные модели
+models/*.gguf
+
+# Environment file with secrets
+.env
 
 # Source code collection script and its output
 collect_source_code.py
@@ -84,3 +90,8 @@ Thumbs.db
 *.bak
 *~
 123.txt
+
+# Лог-файлы
+*.log
+
+IMPLEMENTATION_PLAN.md

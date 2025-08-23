@@ -2,35 +2,28 @@
 
 import torch
 import logging
+from collections import OrderedDict
 from functools import lru_cache
 from langchain_huggingface import HuggingFaceEmbeddings
-from config.settings import load_config, Config
-
-# Настройка логирования
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('app.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
+from config.settings import Config
 
 # Импортируем GGUF эмбеддер
 try:
-    from core.gguf_embeddings import get_gguf_embedder, GGUFEmbeddings
+    from core.gguf_embeddings import get_gguf_embedder
     GGUF_AVAILABLE = True
 except ImportError:
     GGUF_AVAILABLE = False
     # raise ImportError("GGUF эмбеддер не доступен. Установите ctransformers для работы с GGUF моделями.")
     # Временно оставляем print для совместимости, но в будущем лучше использовать raise
-    logger.warning("GGUF эмбеддер не доступен. Установите ctransformers для работы с GGUF моделями.")
 
+logger = logging.getLogger(__name__)
 
 # --- Кэш для embedder'а ---
 # Используем словарь для хранения моделей с ключом (модель, устройство)
-_dense_embedder_cache = {}
+# Добавляем ограничение по размеру кэша для предотвращения утечек памяти
+MAX_CACHE_SIZE = 3  # Максимум 3 модели в кэше одновременно
+
+_dense_embedder_cache = OrderedDict()
 
 
 @lru_cache
@@ -74,24 +67,41 @@ def get_dense_embedder(config: Config, device=None):
         # Проверяем, соответствует ли batch_size
         cached_embedder = _dense_embedder_cache[cache_key]
         if getattr(cached_embedder, "_batch_size", None) == batch_size:
+            # Перемещаем модель в начало OrderedDict (обновляем время последнего использования)
+            _dense_embedder_cache.move_to_end(cache_key, last=True)
             return cached_embedder
+    
+    # Если кэш переполнен, удаляем самую старую запись
+    if len(_dense_embedder_cache) >= MAX_CACHE_SIZE:
+        # Удаляем самую старую запись (первую в OrderedDict)
+        oldest_key, _ = _dense_embedder_cache.popitem(last=False)
+        logger.info(f"Удалена старая модель из кэша: {oldest_key}")
     
     # Подготовка параметров для загрузки модели
     model_kwargs = {"device": device}
-    
-    # Если модель не найдена в кэше или batch_size изменился, создаем новую
+    # Если используем CUDA, указываем dtype через model_kwargs вместо обращения к приватным полям
+    if device == "cuda":
+        import torch as _torch
+        model_kwargs["torch_dtype"] = _torch.float16
+
+    # Если модель не найдена в кеше или batch_size изменился, создаем новую
     embedder = HuggingFaceEmbeddings(
         model_name=model_name,
         model_kwargs=model_kwargs,
         encode_kwargs={"batch_size": batch_size}
     )
-    
-    # Установка torch_dtype после создания модели, если необходимо
-    if device == "cuda":
-        embedder._client[0].half()  # Преобразование весов модели в float16
+
+    # Устанавливаем batch_size для последующего использования
     embedder._batch_size = batch_size  # Для отслеживания
     
     # Сохраняем модель в кэш
     _dense_embedder_cache[cache_key] = embedder
     
     return embedder
+
+
+def clear_embedder_cache():
+    """Очищает кэш эмбеддеров."""
+    global _dense_embedder_cache
+    _dense_embedder_cache.clear()
+    logger.info("Кэш эмбеддеров очищен")
