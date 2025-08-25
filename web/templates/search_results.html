@@ -1,0 +1,25 @@
+{% if results %}
+    <h2>Результаты поиска ({{ results|length }}):</h2>
+    {% for doc, score in results %}
+        <article>
+            <header><b>Источник:</b> {{ doc.metadata.get('source', 'N/A') }} | <b>Сходство:</b> <mark>{{ '%.4f'|format(score) }}</mark></header>
+            <p>{{ doc.page_content }}</p>
+            <!-- Отображаем метаданные -->
+            {% if doc.metadata %}
+                <details>
+                    <summary>Метаданные</summary>
+                    <ul>
+                        {% for key, value in doc.metadata.items() %}
+                            <li><b>{{ key }}:</b> {{ value }}</li>
+                        {% endfor %}
+                    </ul>
+                </details>
+            {% endif %}
+        </article>
+    {% endfor %}
+{% elif request.method == 'POST' %}
+     <p>По вашему запросу ничего не найдено в коллекции '{{ selected_collection }}'.</p>
+{% endif %}
+{% if error %}
+    <p style="color: red;">Ошибка: {{ error }}</p>
+{% endif %}

@@ -3,31 +3,17 @@
 import uvicorn
 import logging
 import sys
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
-from fastapi.staticfiles import StaticFiles
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Импорт приложений
-from web.search_app import app as search_app
-from web.admin_app import app as admin_app
+# Импорт модулей для настройки приложения
+from app_factory import create_app
+from logging_config import setup_logging
+from startup import startup_event_handler
 
-# Централизованная настройка логирования
-LOG_DIR = Path("logs")
-LOG_DIR.mkdir(parents=True, exist_ok=True)
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(str(LOG_DIR / 'app.log'), encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
-# Reduce verbosity of the file watcher to avoid log-change loops
-logging.getLogger('watchfiles').setLevel(logging.WARNING)
+# Настройка логирования через централизованный модуль
+setup_logging()
 logger = logging.getLogger(__name__)
 
 # Загружаем переменные окружения из .env файла
@@ -40,43 +26,36 @@ if fastembed_cache_dir:
     fastembed_cache_path.mkdir(parents=True, exist_ok=True)
     logger.info(f"FastEmbed cache directory: {fastembed_cache_path.absolute()}")
 
-# Создание основного приложения FastAPI
-app = FastAPI(title="KAZrag", description="Поисковая система на основе векторного поиска")
+# Создание основного приложения FastAPI через фабрику
+app = create_app()
 
-# Добавление CORS middleware
-# Нормализуем ALLOWED_ORIGINS: '*' -> ['*'], иначе список origin'ов разделённых запятыми
-allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "*") or "*"
-if allowed_origins_env.strip() == "*":
-    allowed_origins = ["*"]
-else:
-    allowed_origins = [o.strip() for o in allowed_origins_env.split(',') if o.strip()]
+# Register a middleware to generate request IDs
+@app.middleware("http")
+async def add_request_id(request, call_next):
+    import uuid
+    from fastapi import Request
+    
+    # Generate a unique request ID and attach it to the request state
+    request_id = str(uuid.uuid4())
+    request.state.request_id = request_id
+    
+    # Process the request
+    response = await call_next(request)
+    
+    return response
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=allowed_origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Add favicon.ico route to prevent 404 errors
+@app.get("/favicon.ico")
+async def favicon():
+    """Favicon route - returns 204 No Content to prevent 404 errors"""
+    from fastapi.responses import Response
+    return Response(status_code=204)
 
-# Монтирование приложений
-app.mount("/api/search", search_app)
-app.mount("/api/admin", admin_app)
-
-# Добавляем обслуживание статических файлов
-app.mount("/static", StaticFiles(directory="web/static"), name="static")
-
-# Добавляем корневой маршрут для перенаправления на страницу поиска
-@app.get("/", response_class=RedirectResponse)
-async def root():
-    """Корневой маршрут - перенаправляет на страницу поиска"""
-    return RedirectResponse(url="/api/search/")
-
-# Добавляем маршрут для настроек, который перенаправляет на админку
-@app.get("/settings", response_class=RedirectResponse)
-async def settings_redirect():
-    """Маршрут для настроек - перенаправляет на админку"""
-    return RedirectResponse(url="/api/admin/settings")
+# Регистрация обработчиков событий запуска и остановки
+@app.on_event("startup")
+async def startup_event():
+    """Handle application startup event."""
+    startup_event_handler()
 
 if __name__ == "__main__":
     logger.info("Начало запуска приложения")

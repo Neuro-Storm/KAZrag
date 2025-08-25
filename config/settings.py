@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -84,6 +84,13 @@ class Config(BaseModel):
     
     # Настройки индексации документов
     indexing_default_batch_size: int = Field(default=DEFAULT_INDEXING_DEFAULT_BATCH_SIZE, ge=1)  # Минимум 1
+    
+    # Настройки метаданных
+    enable_metadata_extraction: bool = True
+    metadata_custom_fields: Dict[str, Any] = Field(default_factory=dict)
+    metadata_extract_pdf: bool = True
+    metadata_extract_image: bool = True
+    metadata_extract_docx: bool = True
 
 
 def load_config() -> Config:

@@ -3,27 +3,34 @@
 import logging
 import time
 from typing import List
+from core.collection_manager import CollectionManager
 from core.qdrant_client import get_qdrant_client
-from config.settings import load_config
+from config.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
-# --- Кэш для списка коллекций ---
-_collections_cache = None
-_collections_cache_time = 0
-# Глобальный клиент для использования в кэше
-_qdrant_client = None
+# Lazy initialization
+_config_manager = None
+_collection_manager = None
 
 
-def get_qdrant_client_cached():
-    """Возвращает закэшированный клиент Qdrant."""
-    global _qdrant_client
-    if _qdrant_client is None:
-        _qdrant_client = get_qdrant_client()
-    return _qdrant_client
+def _get_config_manager():
+    """Get or create config manager instance."""
+    global _config_manager
+    if _config_manager is None:
+        _config_manager = ConfigManager.get_instance()
+    return _config_manager
 
 
-def get_cached_collections(client = None) -> List[str]:
+def _get_collection_manager():
+    """Get or create collection manager instance."""
+    global _collection_manager
+    if _collection_manager is None:
+        _collection_manager = CollectionManager.get_instance()
+    return _collection_manager
+
+
+def get_cached_collections(client=None) -> List[str]:
     """
     Получает список коллекций с кэшированием.
     
@@ -33,53 +40,26 @@ def get_cached_collections(client = None) -> List[str]:
     Returns:
         List[str]: Список названий коллекций.
     """
-    global _collections_cache, _collections_cache_time
-    
-    # Загружаем конфигурацию для получения TTL
-    config = load_config()
-    
-    current_time = time.time()
-    
-    # Проверяем, нужно ли обновить кэш
-    if (_collections_cache is None or 
-        current_time - _collections_cache_time > config.collections_cache_ttl):
-        
-        try:
-            # Если клиент не передан, используем закэшированный
-            if client is None:
-                client = get_qdrant_client_cached()
-                
-            collections_response = client.get_collections()
-            _collections_cache = [c.name for c in collections_response.collections]
-            _collections_cache_time = current_time
-            logger.debug(f"Обновлен кэш коллекций: {_collections_cache}")
-        except Exception as e:
-            logger.exception(f"Ошибка при получении списка коллекций: {e}")
-            # В случае ошибки возвращаем пустой список или старый кэш, если он есть
-            if _collections_cache is None:
-                _collections_cache = []
-    
-    return _collections_cache
+    try:
+        collection_manager = _get_collection_manager()
+        collections_dict = collection_manager.get_collections(client)
+        return list(collections_dict.keys())
+    except Exception as e:
+        logger.exception(f"Ошибка при получении списка коллекций: {e}")
+        return []
 
 
-def refresh_collections_cache(client = None):
+async def refresh_collections_cache(client=None):
     """
     Принудительно обновляет кэш коллекций.
     
     Args:
         client (QdrantClient, optional): Клиент Qdrant. Если не указан, используется закэшированный.
     """
-    global _collections_cache, _collections_cache_time
-    
     try:
-        # Если клиент не передан, используем закэшированный
-        if client is None:
-            client = get_qdrant_client_cached()
-            
-        collections_response = client.get_collections()
-        _collections_cache = [c.name for c in collections_response.collections]
-        _collections_cache_time = time.time()
-        logger.debug(f"Принудительно обновлен кэш коллекций: {_collections_cache}")
+        collection_manager = _get_collection_manager()
+        collections_dict = collection_manager.refresh_collections(client)
+        logger.debug(f"Принудительно обновлен кэш коллекций: {list(collections_dict.keys())}")
     except Exception as e:
         logger.exception(f"Ошибка при принудительном обновлении кэша коллекций: {e}")
 
@@ -95,7 +75,8 @@ def recreate_collection_from_config(force_recreate: bool = True):
         Tuple[bool, str]: (успех, статус)
     """
     try:
-        config = load_config()
+        config_manager = _get_config_manager()
+        config = config_manager.get()
         
         # Проверка наличия хотя бы одного типа индексации
         if not (config.index_dense or config.index_bm25 or config.index_hybrid):
@@ -107,18 +88,20 @@ def recreate_collection_from_config(force_recreate: bool = True):
             
         client = get_qdrant_client(config)
         
-        # Проверка существования коллекции
-        collections = client.get_collections()
-        collection_names = [c.name for c in collections.collections]
+        # Используем CollectionManager для проверки существования коллекции
+        collection_manager = _get_collection_manager()
+        collections_dict = collection_manager.get_collections(client)
+        collection_exists = config.collection_name in collections_dict
         
-        if config.collection_name in collection_names and force_recreate:
-            # Удаление существующей коллекции
+        if collection_exists and force_recreate:
+            # Удаление существующей коллекции через CollectionManager
             client.delete_collection(config.collection_name)
+            # Очищаем кэш CollectionManager
+            collection_manager.refresh_collections(client)
             logger.info(f"Удалена существующая коллекция: {config.collection_name}")
             
-        if config.collection_name not in collection_names or force_recreate:
+        if not collection_exists or force_recreate:
             # Создание новой коллекции
-            
             # Создаем временную коллекцию для получения параметров
             if config.index_dense:
                 # Для плотных векторов создаем коллекцию с нужными параметрами

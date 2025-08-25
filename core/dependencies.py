@@ -3,7 +3,8 @@
 import logging
 import time
 from fastapi import Depends
-from config.settings import load_config, Config
+from config.config_manager import ConfigManager
+from config.settings import Config
 from tenacity import retry, stop_after_attempt, wait_fixed
 from core.constants import RETRY_ATTEMPTS, RETRY_WAIT_TIME
 from core.qdrant_client import get_qdrant_client
@@ -13,10 +14,13 @@ logger = logging.getLogger(__name__)
 # --- Кэш для проверки соединения ---
 _last_connection_check = 0
 
+# Get singleton instance of ConfigManager
+config_manager = ConfigManager.get_instance()
+
 
 def get_config() -> Config:
     """Зависимость для получения конфигурации."""
-    return load_config()
+    return config_manager.get()
 
 
 @retry(stop=stop_after_attempt(RETRY_ATTEMPTS), wait=wait_fixed(RETRY_WAIT_TIME))

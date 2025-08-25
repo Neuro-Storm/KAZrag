@@ -1,18 +1,91 @@
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
     <title>Поиск по документам</title>
     <link rel="stylesheet" href="/static/simple.min.css">
+    <style>
+        .metadata-filter-section {
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+        .metadata-filter-section h3 {
+            margin-top: 0;
+        }
+        .metadata-filter-row {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 0.5rem;
+            align-items: center;
+        }
+        .metadata-filter-row label {
+            min-width: 120px;
+        }
+        .metadata-filter-row input, .metadata-filter-row select {
+            flex: 1;
+        }
+        .add-filter-btn, .remove-filter-btn {
+            margin: 0.5rem 0;
+        }
+        .advanced-filter-toggle {
+            cursor: pointer;
+            color: #0066cc;
+            text-decoration: underline;
+        }
+        .collapsible {
+            cursor: pointer;
+            padding: 10px;
+            background-color: #f1f1f1;
+            border: none;
+            text-align: left;
+            outline: none;
+            margin: 1rem 0;
+        }
+        .content {
+            padding: 0 18px;
+            display: none;
+            overflow: hidden;
+            background-color: #f9f9f9;
+        }
+        #loading-indicator {
+            display: none;
+            padding: 1rem;
+            text-align: center;
+        }
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #error-message {
+            display: none;
+            color: red;
+            padding: 1rem;
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 4px;
+            margin: 1rem 0;
+        }
+    </style>
 </head>
 <body>
     <header>
         <h1>Поиск по документам</h1>
-        <nav><a href="/">Поиск</a> <a href="/settings">Настройки</a></nav>
+        <nav><a href="/">Поиск</a> <a href="/settings/">Настройки</a></nav>
     </header>
     <main>
-        <form action="/api/search/" method="post">
+        <form id="search-form">
             <div class="grid">
                 <label for="collection">Искать в коллекции
                     <select id="collection" name="collection" required>
@@ -31,6 +104,48 @@
             </div>
             <label for="query">Поисковый запрос:</label>
             <input type="text" name="query" id="query" placeholder="Введите ваш запрос..." value="{{ query or '' }}" required>
+            
+            <label for="k">Количество результатов:</label>
+            <input type="number" name="k" id="k" value="{{ k or config.search_default_k if config else 5 }}" min="1" max="100">
+            
+            <!-- Фильтр по метаданным под спойлером -->
+            <button type="button" class="collapsible">Фильтр по метаданным</button>
+            <div class="content">
+                <div class="metadata-filter-section">
+                    <h3>Параметры фильтрации</h3>
+                    <div id="metadata-filters">
+                        <!-- Поля для часто используемых фильтров -->
+                        <div class="metadata-filter-row">
+                            <label for="filter_author">Автор:</label>
+                            <input type="text" id="filter_author" name="filter_author" placeholder="Иванов И.И." value="{{ filter_author or '' }}">
+                        </div>
+                        <div class="metadata-filter-row">
+                            <label for="filter_source">Источник:</label>
+                            <input type="text" id="filter_source" name="filter_source" placeholder="документ.pdf" value="{{ filter_source or '' }}">
+                        </div>
+                        <div class="metadata-filter-row">
+                            <label for="filter_file_extension">Тип файла:</label>
+                            <select id="filter_file_extension" name="filter_file_extension">
+                                <option value="">Любой</option>
+                                <option value=".pdf" {% if filter_file_extension == '.pdf' %}selected{% endif %}>PDF</option>
+                                <option value=".docx" {% if filter_file_extension == '.docx' %}selected{% endif %}>DOCX</option>
+                                <option value=".txt" {% if filter_file_extension == '.txt' %}selected{% endif %}>TXT</option>
+                                <option value=".md" {% if filter_file_extension == '.md' %}selected{% endif %}>Markdown</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- Поле для произвольного JSON фильтра (для продвинутых пользователей) -->
+                    <div id="advanced-filter-section" style="display: none;">
+                        <label for="metadata_filter">Произвольный фильтр (JSON):</label>
+                        <input type="text" name="metadata_filter" id="metadata_filter" placeholder='{"author": "Иванов", "year": 2023}' value="{{ metadata_filter or '' }}">
+                        <p class="help-text">Примеры: {"author": "Иванов"}, {"year": {"$gt": 2020}}, {"tags": {"$contains": "важно"}}</p>
+                    </div>
+                    
+                    <a id="toggle-advanced-filter" class="advanced-filter-toggle" onclick="toggleAdvancedFilter()">Показать расширенный фильтр</a>
+                </div>
+            </div>
+            
             <fieldset>
                 <legend>Тип поиска</legend>
                 <input type="radio" id="search_dense" name="search_type" value="dense" {% if not hybrid and selected_search_type != 'sparse' %}checked{% endif %}>
@@ -44,38 +159,72 @@
             </fieldset>
             <button type="submit">Найти</button>
         </form>
-        {% if results %}
-            <h2>Результаты поиска ({{ results|length }}):</h2>
-            {% for doc, score in results %}
-                <article>
-                    <header><b>Источник:</b> {{ doc.metadata.get('source', 'N/A') }} | <b>Сходство:</b> <mark>{{ '%.4f'|format(score) }}</mark></header>
-                    <p>{{ doc.page_content }}</p>
-                </article>
-            {% endfor %}
-        {% elif request.method == 'POST' %}
-             <p>По вашему запросу ничего не найдено в коллекции '{{ selected_collection }}'.</p>
-        {% endif %}
-        {% if error %}
-            <p style=\"color: red;\">Ошибка: {{ error }}</p>
-        {% endif %}
+        
+        <!-- Индикатор загрузки -->
+        <div id="loading-indicator">
+            <span class="spinner"></span> Выполняется поиск...
+        </div>
+        
+        <!-- Сообщение об ошибке -->
+        <div id="error-message"></div>
+        
+        <!-- Контейнер для результатов поиска -->
+        <div id="search-results-container">
+            {% if results %}
+                <h2>Результаты поиска ({{ results|length }}):</h2>
+                {% for doc, score in results %}
+                    <article>
+                        <header><b>Источник:</b> {{ doc.metadata.get('source', 'N/A') }} | <b>Сходство:</b> <mark>{{ '%.4f'|format(score) }}</mark></header>
+                        <p>{{ doc.page_content }}</p>
+                        <!-- Отображаем метаданные -->
+                        {% if doc.metadata %}
+                            <details>
+                                <summary>Метаданные</summary>
+                                <ul>
+                                    {% for key, value in doc.metadata.items() %}
+                                        <li><b>{{ key }}:</b> {{ value }}</li>
+                                    {% endfor %}
+                                </ul>
+                            </details>
+                        {% endif %}
+                    </article>
+                {% endfor %}
+            {% elif request.method == 'POST' %}
+                 <p>По вашему запросу ничего не найдено в коллекции '{{ selected_collection }}'.</p>
+            {% endif %}
+            {% if error %}
+                <p style="color: red;">Ошибка: {{ error }}</p>
+            {% endif %}
+        </div>
     </main>
+    <script src="/static/ajax.js"></script>
     <script>
-        // Обработчики событий для радиокнопок поиска
-        document.getElementById('search_dense').addEventListener('change', function() {
-            if (this.checked) {
-                document.getElementById('hybrid').value = 'False';
+        // Переключение видимости расширенного фильтра
+        function toggleAdvancedFilter() {
+            const section = document.getElementById('advanced-filter-section');
+            const toggleLink = document.getElementById('toggle-advanced-filter');
+            if (section.style.display === 'none') {
+                section.style.display = 'block';
+                toggleLink.textContent = 'Скрыть расширенный фильтр';
+            } else {
+                section.style.display = 'none';
+                toggleLink.textContent = 'Показать расширенный фильтр';
             }
-        });
+        }
         
-        document.getElementById('search_sparse').addEventListener('change', function() {
-            if (this.checked) {
-                document.getElementById('hybrid').value = 'False';
-            }
-        });
-        
-        document.getElementById('search_hybrid').addEventListener('change', function() {
-            if (this.checked) {
-                document.getElementById('hybrid').value = 'True';
+        // Обработчик для спойлера фильтра по метаданным
+        document.addEventListener('DOMContentLoaded', function() {
+            var coll = document.getElementsByClassName("collapsible");
+            for (var i = 0; i < coll.length; i++) {
+                coll[i].addEventListener("click", function() {
+                    this.classList.toggle("active");
+                    var content = this.nextElementSibling;
+                    if (content.style.display === "block") {
+                        content.style.display = "none";
+                    } else {
+                        content.style.display = "block";
+                    }
+                });
             }
         });
     </script>

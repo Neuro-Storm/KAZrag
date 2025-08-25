@@ -7,6 +7,7 @@
 - Сохраняет изображения в отдельную папку
 - Поддерживает различные настройки парсинга (формулы, таблицы)
 - Обрабатывает файлы через subprocess вызов mineru
+- Извлекает метаданные из PDF файлов
 
 Структура выходных данных:
 output_md_dir/
@@ -20,7 +21,13 @@ import subprocess
 import shutil
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
+
+try:
+    from PyPDF2 import PdfReader
+    HAS_PYPDF2 = True
+except ImportError:
+    HAS_PYPDF2 = False
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +103,6 @@ def run_subprocess(pdf_file: Path, temp_output_dir: Path, backend: str, method: 
         timeout=600  # Фиксированный таймаут 10 минут
     )
 
-
 def postprocess_output(pdf_file: Path, pdf_stem: str, temp_output_dir: Path, final_output_dir: Path, output_root_path: Path) -> bool:
     """
     Пост-обработка вывода mineru.
@@ -112,37 +118,95 @@ def postprocess_output(pdf_file: Path, pdf_stem: str, temp_output_dir: Path, fin
         bool: Успешность пост-обработки.
     """
     # Пост-обработка: перенос результатов из временной папки в финальную
-    # Ищем созданный .md файл в temp_output_dir или подпапках
-    md_files = list(temp_output_dir.rglob("*.md"))
-    if not md_files:
-        logger.warning(f"  -> Предупреждение: Не найден .md файл после обработки {pdf_file.name}.")
-        return False
+    # MinerU создает вложенные директории вида temp_output_dir/{pdf_stem}/auto/
+    mineru_output_dir = temp_output_dir / pdf_stem / "auto"
+    
+    # Если такой директории нет, ищем .md файл в temp_output_dir или подпапках
+    if not mineru_output_dir.exists():
+        md_files = list(temp_output_dir.rglob("*.md"))
+        if not md_files:
+            logger.warning(f"  -> Предупреждение: Не найден .md файл после обработки {pdf_file.name}.")
+            return False
+            
+        # Используем директорию с первым найденным .md файлом
+        mineru_output_dir = md_files[0].parent
+        logger.info(f"  -> Используется директория с найденным файлом: {mineru_output_dir.relative_to(temp_output_dir)}")
+    else:
+        logger.info(f"  -> Используется стандартная директория MinerU: {mineru_output_dir.relative_to(temp_output_dir)}")
 
-    # Предполагаем, что основной файл имеет имя, совпадающее с именем PDF
-    target_md_file = temp_output_dir / f"{pdf_stem}.md"
+    # Проверяем наличие .md файла
+    target_md_file = mineru_output_dir / f"{pdf_stem}.md"
     if not target_md_file.exists():
-         # Если нет, берем первый найденный
-         target_md_file = md_files[0]
-         logger.info(f"  -> Используется найденный файл: {target_md_file.relative_to(temp_output_dir)}")
+        # Ищем любой .md файл в директории
+        md_files = list(mineru_output_dir.glob("*.md"))
+        if not md_files:
+            logger.warning(f"  -> Предупреждение: Не найден .md файл в директории {mineru_output_dir}.")
+            return False
+        target_md_file = md_files[0]
+        logger.info(f"  -> Используется найденный файл: {target_md_file.name}")
 
     # Создаем финальную папку для этого PDF
     final_output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Перемещаем .md файл
+    # Копируем .md файл
     final_md_path = final_output_dir / f"{pdf_stem}.md"
-    target_md_file.rename(final_md_path)
-    logger.info(f"  -> .md файл перемещен в: {final_md_path.relative_to(output_root_path)}")
+    shutil.copy2(target_md_file, final_md_path)  # Используем copy2 для сохранения метаданных
+    logger.info(f"  -> .md файл скопирован в: {final_md_path.relative_to(output_root_path)}")
     
-    # Перемещаем папку с изображениями, если она есть
-    images_dir_in_temp = temp_output_dir / "images"
+    # Копируем папку с изображениями, если она есть
+    images_dir_in_temp = mineru_output_dir / "images"
     if images_dir_in_temp.exists() and images_dir_in_temp.is_dir():
         images_dir_final = final_output_dir / "images"
-        # shutil.copytree может потребоваться, если нужно сохранить оригиналы
-        shutil.move(str(images_dir_in_temp), str(images_dir_final)) 
-        logger.info(f"  -> Папка 'images' перемещена в: {images_dir_final.relative_to(output_root_path)}")
+        if images_dir_final.exists():
+            shutil.rmtree(images_dir_final)
+        shutil.copytree(images_dir_in_temp, images_dir_final)
+        logger.info(f"  -> Папка 'images' скопирована в: {images_dir_final.relative_to(output_root_path)}")
         
     return True
 
+def extract_pdf_metadata(pdf_file: Path) -> Dict[str, Any]:
+    """
+    Извлекает метаданные из PDF файла.
+    
+    Args:
+        pdf_file (Path): Путь к PDF файлу.
+        
+    Returns:
+        Dict[str, Any]: Словарь с метаданными PDF.
+    """
+    if not HAS_PYPDF2:
+        logger.warning("PyPDF2 is not available for metadata extraction")
+        return {}
+        
+    if not pdf_file.exists():
+        logger.warning(f"File not found for metadata extraction: {pdf_file}")
+        return {}
+        
+    try:
+        metadata = {}
+        with open(pdf_file, 'rb') as f:
+            pdf = PdfReader(f)
+            if pdf.metadata:
+                # Извлекаем стандартные метаданные
+                pdf_metadata = {
+                    "title": pdf.metadata.get("/Title"),
+                    "author": pdf.metadata.get("/Author"),
+                    "subject": pdf.metadata.get("/Subject"),
+                    "creator": pdf.metadata.get("/Creator"),
+                    "producer": pdf.metadata.get("/Producer"),
+                    "creation_date": pdf.metadata.get("/CreationDate"),
+                    "modification_date": pdf.metadata.get("/ModDate"),
+                }
+                # Фильтруем None значения
+                metadata.update({k: v for k, v in pdf_metadata.items() if v is not None})
+                
+                # Добавляем количество страниц
+                metadata["page_count"] = len(pdf.pages)
+                
+        return metadata
+    except Exception as e:
+        logger.warning(f"Error extracting metadata from PDF file {pdf_file.name}: {e}")
+        return {}
 
 def process_pdfs_and_chunk(
     input_pdf_dir: str,
@@ -165,6 +229,7 @@ def process_pdfs_and_chunk(
     2. Вызывает mineru для конвертации в markdown
     3. Переносит результаты в финальную папку
     4. Очищает временные файлы
+    5. Извлекает метаданные из PDF файлов
 
     Args:
         input_pdf_dir (str): Путь к директории с PDF файлами.
@@ -236,6 +301,16 @@ def process_pdfs_and_chunk(
             # Пост-обработка вывода
             if not postprocess_output(pdf_file, pdf_stem, temp_output_dir, final_output_dir, output_root_path):
                 continue
+
+            # Извлечение метаданных из PDF файла
+            metadata = extract_pdf_metadata(pdf_file)
+            if metadata:
+                # Сохраняем метаданные в отдельный файл
+                metadata_file = final_output_dir / f"{pdf_stem}_metadata.json"
+                import json
+                with open(metadata_file, 'w', encoding='utf-8') as f:
+                    json.dump(metadata, f, ensure_ascii=False, indent=2)
+                logger.info(f"  -> Метаданные сохранены в: {metadata_file.relative_to(output_root_path)}")
 
         except subprocess.TimeoutExpired:
             logger.exception(f"Ошибка: Таймаут при обработке файла {pdf_file.name}.")

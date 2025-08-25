@@ -26,12 +26,14 @@
         .form-info p { margin: 0 0 0.5rem 0; }
         .form-info ul { margin: 0.5rem 0; padding-left: 1.5rem; }
         .help-text { font-size: 0.9em; color: #6c757d; margin: 0.5rem 0 0 0; }
+        #error-message { display: none; color: red; padding: 1rem; background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; margin: 1rem 0; }
+        #success-message { display: none; color: green; padding: 1rem; background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; margin: 1rem 0; }
     </style>
 </head>
 <body>
     <header>
         <h1>Настройки и Управление</h1>
-        <nav><a href="/">Поиск</a> <a href="/settings">Настройки</a></nav>
+        <nav><a href="/">Поиск</a> <a href="/settings/">Настройки</a></nav>
     </header>
     <main>
         {% if status or delete_status %}
@@ -52,6 +54,10 @@
                 {% if msg == 'processing_started' %}Обработка запущена в фоновом режиме.{% endif %}
             </div>
         {% endif %}
+        
+        <!-- Сообщения об ошибках и успехах -->
+        <div id="error-message"></div>
+        <div id="success-message"></div>
         
         <!-- Объединенная форма -->
         <form action="/api/admin/update-settings" method="post">
@@ -151,6 +157,9 @@
                 </fieldset>
                 
                 <button type="submit" name="action" value="save_index_settings">Сохранить настройки индексации</button>
+                <div id="index-settings-progress" class="progress">
+                    <span class="spinner"></span> Сохранение настроек индексации...
+                </div>
             </div>
         </form>
         
@@ -226,6 +235,9 @@
                 <input type="text" id="mineru_models_dir" name="mineru_models_dir" value="{{ config.mineru_models_dir }}">
 
                 <button type="submit" name="action" value="save_mineru_settings">Сохранить настройки MinerU</button>
+                <div id="mineru-settings-progress" class="progress">
+                    <span class="spinner"></span> Сохранение настроек MinerU...
+                </div>
             </div>
         </form>
         
@@ -335,6 +347,9 @@
                 </div>
                 
                 <button type="submit" name="action" value="save_advanced_settings">Сохранить дополнительные настройки</button>
+                <div id="advanced-settings-progress" class="progress">
+                    <span class="spinner"></span> Сохранение дополнительных настроек...
+                </div>
             </form>
         </div>
         
@@ -390,6 +405,85 @@
     </main>
     
     <script>
+        // Функция для выполнения AJAX POST запроса
+        async function ajaxPost(url, data) {
+            const formData = new FormData();
+            for (const key in data) {
+                if (data.hasOwnProperty(key)) {
+                    formData.append(key, data[key]);
+                }
+            }
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                return await response.json();
+            } else {
+                return await response.text();
+            }
+        }
+        
+        // Функция для отображения сообщения об ошибке
+        function showErrorMessage(message) {
+            const errorContainer = document.getElementById('error-message');
+            if (errorContainer) {
+                errorContainer.textContent = message;
+                errorContainer.style.display = 'block';
+            }
+        }
+        
+        // Функция для скрытия сообщения об ошибке
+        function hideErrorMessage() {
+            const errorContainer = document.getElementById('error-message');
+            if (errorContainer) {
+                errorContainer.style.display = 'none';
+            }
+        }
+        
+        // Функция для отображения сообщения об успехе
+        function showSuccessMessage(message) {
+            const successContainer = document.getElementById('success-message');
+            if (successContainer) {
+                successContainer.textContent = message;
+                successContainer.style.display = 'block';
+            }
+        }
+        
+        // Функция для скрытия сообщения об успехе
+        function hideSuccessMessage() {
+            const successContainer = document.getElementById('success-message');
+            if (successContainer) {
+                successContainer.style.display = 'none';
+            }
+        }
+        
+        // Функция для отображения индикатора загрузки
+        function showLoadingIndicator(elementId) {
+            const loadingIndicator = document.getElementById(elementId);
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'block';
+            }
+        }
+        
+        // Функция для скрытия индикатора загрузки
+        function hideLoadingIndicator(elementId) {
+            const loadingIndicator = document.getElementById(elementId);
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'none';
+            }
+        }
+        
         // Обработчики событий для форм с индикаторами прогресса
         function handleProcessPdfsSubmit() {
             try {
@@ -453,9 +547,251 @@
             }
         }
         
+        // Обработчик для формы удаления коллекции
+        async function handleDeleteCollectionSubmit(event) {
+            event.preventDefault();
+            
+            // Скрываем сообщения
+            hideErrorMessage();
+            hideSuccessMessage();
+            
+            const collectionName = document.getElementById('collection_to_delete').value;
+            if (!collectionName) {
+                showErrorMessage('Пожалуйста, выберите коллекцию для удаления.');
+                return;
+            }
+            
+            try {
+                const response = await ajaxPost('/api/admin/settings/delete-collection', {
+                    collection_name: collectionName
+                });
+                
+                if (response.status && response.status.includes('deleted_')) {
+                    showSuccessMessage('Коллекция успешно удалена.');
+                    // Обновляем список коллекций
+                    location.reload();
+                } else if (response.status === 'delete_error') {
+                    showErrorMessage('Ошибка при удалении коллекции.');
+                } else if (response.status === 'error_no_collection_selected') {
+                    showErrorMessage('Не выбрана коллекция для удаления.');
+                } else {
+                    showErrorMessage('Произошла неизвестная ошибка.');
+                }
+            } catch (error) {
+                console.error('Ошибка при удалении коллекции:', error);
+                showErrorMessage('Произошла ошибка при удалении коллекции. Пожалуйста, попробуйте еще раз.');
+            }
+        }
+        
+        // Обработчик для формы настроек индексации
+        async function handleIndexSettingsSubmit(event) {
+            event.preventDefault();
+            
+            // Скрываем сообщения
+            hideErrorMessage();
+            hideSuccessMessage();
+            
+            // Отображаем индикатор загрузки
+            showLoadingIndicator('index-settings-progress');
+            
+            // Собираем данные формы
+            const formData = new FormData(event.target);
+            formData.append('action', 'save_index_settings');
+            
+            try {
+                const response = await ajaxPost('/api/admin/update-settings', Object.fromEntries(formData));
+                
+                if (response.status === 'saved') {
+                    showSuccessMessage('Настройки индексации успешно сохранены.');
+                } else {
+                    showErrorMessage('Ошибка при сохранении настроек индексации.');
+                }
+            } catch (error) {
+                console.error('Ошибка при сохранении настроек индексации:', error);
+                showErrorMessage('Произошла ошибка при сохранении настроек индексации. Пожалуйста, попробуйте еще раз.');
+            } finally {
+                // Скрываем индикатор загрузки
+                hideLoadingIndicator('index-settings-progress');
+            }
+        }
+        
+        // Обработчик для формы настроек MinerU
+        async function handleMineruSettingsSubmit(event) {
+            event.preventDefault();
+            
+            // Скрываем сообщения
+            hideErrorMessage();
+            hideSuccessMessage();
+            
+            // Отображаем индикатор загрузки
+            showLoadingIndicator('mineru-settings-progress');
+            
+            // Собираем данные формы
+            const formData = new FormData(event.target);
+            formData.append('action', 'save_mineru_settings');
+            
+            try {
+                const response = await ajaxPost('/api/admin/update-settings', Object.fromEntries(formData));
+                
+                if (response.status === 'saved') {
+                    showSuccessMessage('Настройки MinerU успешно сохранены.');
+                } else {
+                    showErrorMessage('Ошибка при сохранении настроек MinerU.');
+                }
+            } catch (error) {
+                console.error('Ошибка при сохранении настроек MinerU:', error);
+                showErrorMessage('Произошла ошибка при сохранении настроек MinerU. Пожалуйста, попробуйте еще раз.');
+            } finally {
+                // Скрываем индикатор загрузки
+                hideLoadingIndicator('mineru-settings-progress');
+            }
+        }
+        
+        // Обработчик для формы дополнительных настроек
+        async function handleAdvancedSettingsSubmit(event) {
+            event.preventDefault();
+            
+            // Скрываем сообщения
+            hideErrorMessage();
+            hideSuccessMessage();
+            
+            // Отображаем индикатор загрузки
+            showLoadingIndicator('advanced-settings-progress');
+            
+            // Собираем данные формы
+            const formData = new FormData(event.target);
+            formData.append('action', 'save_advanced_settings');
+            
+            try {
+                const response = await ajaxPost('/api/admin/update-settings', Object.fromEntries(formData));
+                
+                if (response.status === 'saved') {
+                    showSuccessMessage('Дополнительные настройки успешно сохранены.');
+                } else {
+                    showErrorMessage('Ошибка при сохранении дополнительных настроек.');
+                }
+            } catch (error) {
+                console.error('Ошибка при сохранении дополнительных настроек:', error);
+                showErrorMessage('Произошла ошибка при сохранении дополнительных настроек. Пожалуйста, попробуйте еще раз.');
+            } finally {
+                // Скрываем индикатор загрузки
+                hideLoadingIndicator('advanced-settings-progress');
+            }
+        }
+        
+        // Обработчик для формы индексации
+        async function handleRunIndexingSubmit(event) {
+            event.preventDefault();
+            
+            // Отображаем индикатор загрузки
+            showLoadingIndicator('run-indexing-progress');
+            
+            try {
+                const response = await ajaxPost('/api/admin/run-indexing', {});
+                
+                if (response.status === 'indexing_started') {
+                    showSuccessMessage('Индексация запущена в фоновом режиме.');
+                } else {
+                    showErrorMessage('Ошибка при запуске индексации.');
+                }
+            } catch (error) {
+                console.error('Ошибка при запуске индексации:', error);
+                showErrorMessage('Произошла ошибка при запуске индексации. Пожалуйста, попробуйте еще раз.');
+            } finally {
+                // Скрываем индикатор загрузки
+                hideLoadingIndicator('run-indexing-progress');
+            }
+        }
+        
+        // Обработчик для формы обработки PDF
+        async function handleProcessPdfsSubmit(event) {
+            event.preventDefault();
+            
+            // Отображаем индикатор загрузки
+            showLoadingIndicator('process-pdfs-progress');
+            
+            try {
+                const response = await ajaxPost('/api/admin/process-pdfs', {});
+                
+                if (response.status === 'processing_started') {
+                    showSuccessMessage('Обработка PDF запущена в фоновом режиме.');
+                } else {
+                    showErrorMessage('Ошибка при запуске обработки PDF.');
+                }
+            } catch (error) {
+                console.error('Ошибка при запуске обработки PDF:', error);
+                showErrorMessage('Произошла ошибка при запуске обработки PDF. Пожалуйста, попробуйте еще раз.');
+            } finally {
+                // Скрываем индикатор загрузки
+                hideLoadingIndicator('process-pdfs-progress');
+            }
+        }
+        
+        // Обработчик для формы обработки файлов
+        async function handleProcessFilesSubmit(event) {
+            event.preventDefault();
+            
+            // Отображаем индикатор загрузки
+            showLoadingIndicator('process-files-progress');
+            
+            try {
+                const response = await ajaxPost('/api/admin/process-files', {});
+                
+                if (response.status === 'processing_started') {
+                    showSuccessMessage('Обработка файлов запущена в фоновом режиме.');
+                } else {
+                    showErrorMessage('Ошибка при запуске обработки файлов.');
+                }
+            } catch (error) {
+                console.error('Ошибка при запуске обработки файлов:', error);
+                showErrorMessage('Произошла ошибка при запуске обработки файлов. Пожалуйста, попробуйте еще раз.');
+            } finally {
+                // Скрываем индикатор загрузки
+                hideLoadingIndicator('process-files-progress');
+            }
+        }
+        
         // Инициализация обработчиков после загрузки DOM
         document.addEventListener('DOMContentLoaded', function() {
             setupIndexHybridHandler();
+            
+            // Добавляем обработчики для форм настроек
+            const indexSettingsForm = document.querySelector('form[action="/api/admin/update-settings"][method="post"]');
+            if (indexSettingsForm) {
+                indexSettingsForm.addEventListener('submit', handleIndexSettingsSubmit);
+            }
+            
+            const mineruSettingsForm = document.querySelectorAll('form[action="/api/admin/update-settings"][method="post"]')[1];
+            if (mineruSettingsForm) {
+                mineruSettingsForm.addEventListener('submit', handleMineruSettingsSubmit);
+            }
+            
+            const advancedSettingsForm = document.querySelector('#advanced-settings-content form');
+            if (advancedSettingsForm) {
+                advancedSettingsForm.addEventListener('submit', handleAdvancedSettingsSubmit);
+            }
+            
+            // Добавляем обработчики для форм индексации и обработки файлов
+            const runIndexingForm = document.getElementById('run-indexing-form');
+            if (runIndexingForm) {
+                runIndexingForm.addEventListener('submit', handleRunIndexingSubmit);
+            }
+            
+            const processPdfsForm = document.getElementById('process-pdfs-form');
+            if (processPdfsForm) {
+                processPdfsForm.addEventListener('submit', handleProcessPdfsSubmit);
+            }
+            
+            const processFilesForm = document.getElementById('process-files-form');
+            if (processFilesForm) {
+                processFilesForm.addEventListener('submit', handleProcessFilesSubmit);
+            }
+            
+            // Добавляем обработчик для формы удаления коллекции
+            const deleteCollectionForm = document.querySelector('form[action="/api/admin/settings/delete-collection"]');
+            if (deleteCollectionForm) {
+                deleteCollectionForm.addEventListener('submit', handleDeleteCollectionSubmit);
+            }
         });
     </script>
 </body>

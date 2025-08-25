@@ -16,7 +16,13 @@ class ConverterManager:
     def __init__(self):
         """Initialize the converter manager with available converters."""
         self.converters: Dict[str, BaseConverter] = {}
-        self._load_converters()
+        self._initialized = False
+    
+    def _initialize_if_needed(self):
+        """Initialize converters only when needed."""
+        if not self._initialized:
+            self._load_converters()
+            self._initialized = True
     
     def _load_converters(self):
         """Load available converters dynamically."""
@@ -65,6 +71,9 @@ class ConverterManager:
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
             
+        # Initialize if needed
+        self._initialize_if_needed()
+        
         # Get file extension
         ext = file_path.suffix.lower()
         
@@ -87,6 +96,9 @@ class ConverterManager:
         Returns:
             List[str]: List of supported extensions
         """
+        # Initialize if needed
+        self._initialize_if_needed()
+        
         extensions = set()
         for converter in self.converters.values():
             if hasattr(converter, 'supported_extensions'):

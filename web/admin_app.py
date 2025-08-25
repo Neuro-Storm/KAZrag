@@ -2,51 +2,48 @@
 
 import os
 import logging
+import uuid
 from typing import Optional
-from fastapi import FastAPI, Form, Request, Depends, HTTPException, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Form, Request, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 # Qdrant client provided via dependency injection (core.dependencies.get_client)
 from dotenv import load_dotenv
-from pathlib import Path
 
-from config.settings import save_config, Config
+from config.config_manager import ConfigManager
+from config.settings import Config
 from core.indexer import run_indexing_logic
 from core.file_converter import run_pdf_processing_from_config, run_multi_format_processing_from_config
 from core.qdrant_collections import get_cached_collections, refresh_collections_cache
 from core.dependencies import get_config, get_client
-
-# Загружаем переменные окружения из .env файла
-load_dotenv()
-
-# Проверяем и создаем директорию для кэша моделей fastembed, если она задана
-fastembed_cache_dir = os.environ.get('FASTEMBED_CACHE_DIR')
-if fastembed_cache_dir:
-    fastembed_cache_path = Path(fastembed_cache_dir)
-    fastembed_cache_path.mkdir(parents=True, exist_ok=True)
-
-# Инициализация FastAPI приложения и шаблонов
-app = FastAPI()
-templates = Jinja2Templates(directory="web/templates")
-
-# Настройка HTTP Basic Authentication
-security = HTTPBasic()
-
-# Получаем API ключ из переменной окружения
-ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
+from core.exception_handlers import get_request_id
 
 logger = logging.getLogger(__name__)
 
-# Инициализация FastAPI приложения и шаблонов
-app = FastAPI()
-templates = Jinja2Templates(directory="web/templates")
+# Инициализация APIRouter
+app = APIRouter()
+
+# Lazy initialization of templates
+_templates = None
+
+
+def get_templates():
+    """Get or create Jinja2Templates instance."""
+    global _templates
+    if _templates is None:
+        _templates = Jinja2Templates(directory="web/templates")
+    return _templates
+
 
 # Настройка HTTP Basic Authentication
 security = HTTPBasic()
 
 # Получаем API ключ из переменной окружения
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
+
+# Get singleton instance of ConfigManager
+config_manager = ConfigManager.get_instance()
 
 
 def update_index_settings(form_data: dict, config: Config):
@@ -233,9 +230,11 @@ def update_advanced_settings(form_data: dict, config: Config):
 
 async def verify_admin_access_from_form(credentials: HTTPBasicCredentials = Depends(security)):
     """Проверяет учетные данные для доступа к админке."""
+    request_id = getattr(credentials, "request_id", str(uuid.uuid4())) if hasattr(credentials, '__dict__') else str(uuid.uuid4())
+    
     # Если API ключ не установлен в .env, разрешаем доступ без аутентификации
     if not ADMIN_API_KEY:
-        logger.warning("ADMIN_API_KEY not set, access denied")
+        logger.warning(f"[{request_id}] ADMIN_API_KEY not set, access denied")
         raise HTTPException(
             status_code=401,
             detail="API key not set",
@@ -248,6 +247,7 @@ async def verify_admin_access_from_form(credentials: HTTPBasicCredentials = Depe
         return credentials.username
     
     # В противном случае, возвращаем ошибку
+    logger.warning(f"[{request_id}] Invalid admin credentials provided")
     raise HTTPException(
         status_code=401,
         detail="Неверные учетные данные",
@@ -255,37 +255,67 @@ async def verify_admin_access_from_form(credentials: HTTPBasicCredentials = Depe
     )
 
 
-@app.get("/settings", response_class=HTMLResponse)
+@app.get("/settings/", response_class=HTMLResponse)
 async def get_settings_page(request: Request, status: str = None, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config), client = Depends(get_client)):
     """Отображает страницу настроек."""
-    logger.debug(f"Загружена конфигурация: {config.dict()}")
-    collections = get_cached_collections(client=client)
-    # Получаем директорию кэша fastembed из переменных окружения
-    fastembed_cache_dir = os.environ.get('FASTEMBED_CACHE_DIR')
-    return templates.TemplateResponse("settings.html", {
-        "request": request,
-        "config": config,
-        "collections": collections,
-        "delete_status": status,
-        "fastembed_cache_dir": fastembed_cache_dir
-    })
+    request_id = get_request_id(request)
+    logger.debug(f"[{request_id}] Loading settings page for user: {username}")
+    
+    try:
+        logger.debug(f"[{request_id}] Configuration loaded: {config.dict()}")
+        collections = get_cached_collections(client=client)
+        # Получаем директорию кэша fastembed из переменных окружения
+        fastembed_cache_dir = os.environ.get('FASTEMBED_CACHE_DIR')
+        
+        logger.info(f"[{request_id}] Settings page loaded successfully")
+        return get_templates().TemplateResponse("settings.html", {
+            "request": request,
+            "config": config,
+            "collections": collections,
+            "delete_status": status,
+            "fastembed_cache_dir": fastembed_cache_dir
+        })
+    except Exception as e:
+        logger.exception(f"[{request_id}] Error loading settings page: {str(e)}")
+        # Return error page
+        return get_templates().TemplateResponse("settings.html", {
+            "request": request,
+            "config": config,
+            "collections": [],
+            "delete_status": status,
+            "error": "Ошибка загрузки страницы настроек"
+        })
 
 
 @app.post("/settings/delete-collection", response_class=RedirectResponse)
 async def delete_collection(request: Request, collection_name: str = Form(...), username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config), client = Depends(get_client)):
     """Удаляет указанную коллекцию из Qdrant."""
+    request_id = get_request_id(request)
+    logger.info(f"[{request_id}] Delete collection request: {collection_name} by user: {username}")
+    
     status_msg = ""
     try:
         if not collection_name:
-             status_msg = "error_no_collection_selected"
+            status_msg = "error_no_collection_selected"
+            logger.warning(f"[{request_id}] No collection name provided for deletion")
         else:
             client.delete_collection(collection_name)
             await refresh_collections_cache(client=client)  # Обновляем кэш после удаления
             status_msg = f"deleted_{collection_name}"
+            logger.info(f"[{request_id}] Collection '{collection_name}' deleted successfully")
     except Exception as e:
-        logger.exception(f"Ошибка при удалении коллекции '{collection_name}': {e}")
+        logger.exception(f"[{request_id}] Error deleting collection '{collection_name}': {str(e)}")
         status_msg = "delete_error"
-    return RedirectResponse(url=f"/settings?status={status_msg}", status_code=303)
+    
+    # Проверяем, является ли запрос AJAX запросом
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    
+    if is_ajax:
+        # Для AJAX запросов возвращаем JSON ответ
+        return JSONResponse(content={"status": status_msg})
+    else:
+        # Для обычных запросов возвращаем редирект
+        return RedirectResponse(url=f"/settings?status={status_msg}", status_code=303)
 
 
 # Обновление настроек приложения с разделением на типы (индексация/MinerU/Дополнительные)
@@ -338,120 +368,222 @@ async def update_settings(
     config: Config = Depends(get_config)
 ):
     """Обновляет настройки приложения."""
+    request_id = get_request_id(request)
+    logger.info(f"[{request_id}] Update settings request: action={action} by user: {username}")
     
-    # Импортируем кэш для сброса при смене модели или устройства
-    
-    # Собираем данные формы в словарь
-    form_data = {
-        "folder_path": folder_path,
-        "collection_name": collection_name,
-        "hf_model": hf_model,
-        "chunk_size": chunk_size,
-        "embedding_batch_size": embedding_batch_size,
-        "indexing_batch_size": indexing_batch_size,
-        "chunk_overlap": chunk_overlap,
-        "use_dense": use_dense,
-        "device": device,
-        "mineru_input_pdf_dir": mineru_input_pdf_dir,
-        "mineru_output_md_dir": mineru_output_md_dir,
-        "mineru_enable_formula_parsing": mineru_enable_formula_parsing,
-        "mineru_enable_table_parsing": mineru_enable_table_parsing,
-        "mineru_model_source": mineru_model_source,
-        "mineru_models_dir": mineru_models_dir,
-        "mineru_backend": mineru_backend,
-        "mineru_method": mineru_method,
-        "mineru_lang": mineru_lang,
-        "mineru_sglang_url": mineru_sglang_url,
-        # Дополнительные поля
-        "config_cache_ttl": config_cache_ttl,
-        "qdrant_client_cache_ttl": qdrant_client_cache_ttl,
-        "collections_cache_ttl": collections_cache_ttl,
-        "gguf_model_n_ctx": gguf_model_n_ctx,
-        "search_default_k": search_default_k,
-        "qdrant_url": qdrant_url,
-        "qdrant_retry_attempts": qdrant_retry_attempts,
-        "qdrant_retry_wait_time": qdrant_retry_wait_time,
-        "memory_threshold": memory_threshold,
-        "indexing_default_batch_size": indexing_default_batch_size,
-        "sparse_embedding": sparse_embedding,
-        "mineru_subprocess_timeout": mineru_subprocess_timeout,
-    }
-    # Получаем все поля исходной формы (включая чекбоксы, которые могут отсутствовать в аргументах функции)
     try:
-        raw_form = await request.form()
-    except Exception:
-        raw_form = {}
+        # Импортируем кэш для сброса при смене модели или устройства
+        
+        # Собираем данные формы в словарь
+        form_data = {
+            "folder_path": folder_path,
+            "collection_name": collection_name,
+            "hf_model": hf_model,
+            "chunk_size": chunk_size,
+            "embedding_batch_size": embedding_batch_size,
+            "indexing_batch_size": indexing_batch_size,
+            "chunk_overlap": chunk_overlap,
+            "use_dense": use_dense,
+            "device": device,
+            "mineru_input_pdf_dir": mineru_input_pdf_dir,
+            "mineru_output_md_dir": mineru_output_md_dir,
+            "mineru_enable_formula_parsing": mineru_enable_formula_parsing,
+            "mineru_enable_table_parsing": mineru_enable_table_parsing,
+            "mineru_model_source": mineru_model_source,
+            "mineru_models_dir": mineru_models_dir,
+            "mineru_backend": mineru_backend,
+            "mineru_method": mineru_method,
+            "mineru_lang": mineru_lang,
+            "mineru_sglang_url": mineru_sglang_url,
+            # Дополнительные поля
+            "config_cache_ttl": config_cache_ttl,
+            "qdrant_client_cache_ttl": qdrant_client_cache_ttl,
+            "collections_cache_ttl": collections_cache_ttl,
+            "gguf_model_n_ctx": gguf_model_n_ctx,
+            "search_default_k": search_default_k,
+            "qdrant_url": qdrant_url,
+            "qdrant_retry_attempts": qdrant_retry_attempts,
+            "qdrant_retry_wait_time": qdrant_retry_wait_time,
+            "memory_threshold": memory_threshold,
+            "indexing_default_batch_size": indexing_default_batch_size,
+            "sparse_embedding": sparse_embedding,
+            "mineru_subprocess_timeout": mineru_subprocess_timeout,
+        }
+        # Получаем все поля исходной формы (включая чекбоксы, которые могут отсутствовать в аргументах функции)
+        try:
+            raw_form = await request.form()
+        except Exception:
+            raw_form = {}
 
-    def form_bool(key: str) -> bool:
-        # Checkbox присутствует в форме -> treated as True. Also accept explicit 'True'/'true' values.
-        if key in raw_form:
-            val = raw_form.get(key)
-            if isinstance(val, str):
-                return val.lower() in ("true", "1", "on")
-            return True
-        return False
+        def form_bool(key: str) -> bool:
+            # Checkbox присутствует в форме -> treated as True. Also accept explicit 'True'/'true' values.
+            if key in raw_form:
+                val = raw_form.get(key)
+                if isinstance(val, str):
+                    return val.lower() in ("true", "1", "on")
+                return True
+            return False
 
-    # Populate explicit index flags from raw form
-    form_data["index_dense"] = form_bool("index_dense")
-    form_data["index_bm25"] = form_bool("index_bm25")
-    form_data["index_hybrid"] = form_bool("index_hybrid")
-    # Also populate legacy flags if present
-    form_data["use_dense"] = form_bool("use_dense") or form_data.get("use_dense", False)
-    form_data["use_hybrid"] = form_bool("use_hybrid") or form_data.get("use_hybrid", False)
-    
-    # Handle new indexing_type parameter
-    indexing_type = raw_form.get("indexing_type")
-    if indexing_type == "dense":
-        form_data["index_dense"] = True
-        form_data["index_bm25"] = False
-        form_data["index_hybrid"] = False
-    elif indexing_type == "sparse":
-        form_data["index_dense"] = False
-        form_data["index_bm25"] = True
-        form_data["index_hybrid"] = False
-    elif indexing_type == "hybrid":
-        form_data["index_dense"] = True
-        form_data["index_bm25"] = True
-        form_data["index_hybrid"] = True
-    
-    # --- Обработка настроек индексации ---
-    if action == "save_index_settings":
-        update_index_settings(form_data, config)
+        # Populate explicit index flags from raw form
+        form_data["index_dense"] = form_bool("index_dense")
+        form_data["index_bm25"] = form_bool("index_bm25")
+        form_data["index_hybrid"] = form_bool("index_hybrid")
+        # Also populate legacy flags if present
+        form_data["use_dense"] = form_bool("use_dense") or form_data.get("use_dense", False)
+        form_data["use_hybrid"] = form_bool("use_hybrid") or form_data.get("use_hybrid", False)
         
-    # --- Обработка настроек MinerU ---
-    elif action == "save_mineru_settings":
-        update_mineru_settings(form_data, config)
+        # Handle new indexing_type parameter
+        indexing_type = raw_form.get("indexing_type")
+        if indexing_type == "dense":
+            form_data["index_dense"] = True
+            form_data["index_bm25"] = False
+            form_data["index_hybrid"] = False
+        elif indexing_type == "sparse":
+            form_data["index_dense"] = False
+            form_data["index_bm25"] = True
+            form_data["index_hybrid"] = False
+        elif indexing_type == "hybrid":
+            form_data["index_dense"] = True
+            form_data["index_bm25"] = True
+            form_data["index_hybrid"] = True
         
-    # --- Обработка дополнительных настроек ---
-    elif action == "save_advanced_settings":
-        update_advanced_settings(form_data, config)
+        # --- Обработка настроек индексации ---
+        if action == "save_index_settings":
+            update_index_settings(form_data, config)
+            
+        # --- Обработка настроек MinerU ---
+        elif action == "save_mineru_settings":
+            update_mineru_settings(form_data, config)
+            
+        # --- Обработка дополнительных настроек ---
+        elif action == "save_advanced_settings":
+            update_advanced_settings(form_data, config)
+            
+        config_manager.save(config)
+        logger.info(f"[{request_id}] Settings updated successfully: action={action}")
         
-    save_config(config)
-    return RedirectResponse(url="/settings?status=saved", status_code=303)
+        # Проверяем, является ли запрос AJAX запросом
+        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        
+        if is_ajax:
+            # Для AJAX запросов возвращаем JSON ответ
+            return JSONResponse(content={"status": "saved"})
+        else:
+            # Для обычных запросов возвращаем редирект
+            return RedirectResponse(url="/settings?status=saved", status_code=303)
+            
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        logger.exception(f"[{request_id}] Error updating settings: {str(e)}")
+        # Проверяем, является ли запрос AJAX запросом
+        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        
+        if is_ajax:
+            # Для AJAX запросов возвращаем JSON ответ
+            return JSONResponse(content={"status": "error", "message": "Ошибка сохранения настроек"})
+        else:
+            # Для обычных запросов возвращаем редирект с сообщением об ошибке
+            return RedirectResponse(url="/settings?status=save_error", status_code=303)
 
 
 @app.post("/run-indexing", response_class=RedirectResponse)
-async def run_indexing(background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config), client = Depends(get_client)):
+async def run_indexing(request: Request, background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config), client = Depends(get_client)):
     """Запускает процесс индексации документов."""
-    background_tasks.add_task(run_indexing_logic, client=client)
-    # success, status = await run_indexing_logic(client=client)
-    # if success and "successfully" in status:
-    #     await refresh_collections_cache(client=client)  # Обновляем кэш после индексации
-    return RedirectResponse(url="/settings?status=indexing_started", status_code=303)
+    request_id = get_request_id(request)
+    logger.info(f"[{request_id}] Run indexing request by user: {username}")
+    
+    try:
+        background_tasks.add_task(run_indexing_logic, client=client)
+        logger.info(f"[{request_id}] Indexing task scheduled successfully")
+        
+        # Проверяем, является ли запрос AJAX запросом
+        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        
+        if is_ajax:
+            # Для AJAX запросов возвращаем JSON ответ
+            return JSONResponse(content={"status": "indexing_started"})
+        else:
+            # Для обычных запросов возвращаем редирект
+            return RedirectResponse(url="/settings?status=indexing_started", status_code=303)
+            
+    except Exception as e:
+        logger.exception(f"[{request_id}] Error scheduling indexing task: {str(e)}")
+        # Проверяем, является ли запрос AJAX запросом
+        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        
+        if is_ajax:
+            # Для AJAX запросов возвращаем JSON ответ
+            return JSONResponse(content={"status": "error", "message": "Ошибка запуска индексации"})
+        else:
+            # Для обычных запросов возвращаем редирект с сообщением об ошибке
+            return RedirectResponse(url="/settings?status=indexing_error", status_code=303)
 
 
 # Эндпоинт для обработки PDF через MinerU
 @app.post("/process-pdfs", response_class=RedirectResponse)
-async def process_pdfs_endpoint(background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config)):
+async def process_pdfs_endpoint(request: Request, background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config)):
     """Запускает процесс обработки PDF файлов."""
-    background_tasks.add_task(run_pdf_processing_from_config)
-    # success, status_msg = await run_pdf_processing_from_config()
-    return RedirectResponse(url="/settings?msg=processing_started", status_code=303)
+    request_id = get_request_id(request)
+    logger.info(f"[{request_id}] Process PDFs request by user: {username}")
+    
+    try:
+        background_tasks.add_task(run_pdf_processing_from_config)
+        logger.info(f"[{request_id}] PDF processing task scheduled successfully")
+        
+        # Проверяем, является ли запрос AJAX запросом
+        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        
+        if is_ajax:
+            # Для AJAX запросов возвращаем JSON ответ
+            return JSONResponse(content={"status": "processing_started"})
+        else:
+            # Для обычных запросов возвращаем редирект
+            return RedirectResponse(url="/settings?msg=processing_started", status_code=303)
+            
+    except Exception as e:
+        logger.exception(f"[{request_id}] Error scheduling PDF processing task: {str(e)}")
+        # Проверяем, является ли запрос AJAX запросом
+        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        
+        if is_ajax:
+            # Для AJAX запросов возвращаем JSON ответ
+            return JSONResponse(content={"status": "error", "message": "Ошибка запуска обработки PDF"})
+        else:
+            # Для обычных запросов возвращаем редирект с сообщением об ошибке
+            return RedirectResponse(url="/settings?msg=processing_error", status_code=303)
 
 
 # Эндпоинт для обработки файлов различных форматов
 @app.post("/process-files", response_class=RedirectResponse)
-async def process_files_endpoint(background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config)):
+async def process_files_endpoint(request: Request, background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config)):
     """Запускает процесс обработки файлов различных форматов."""
-    background_tasks.add_task(run_multi_format_processing_from_config)
-    return RedirectResponse(url="/settings?msg=processing_started", status_code=303)
+    request_id = get_request_id(request)
+    logger.info(f"[{request_id}] Process files request by user: {username}")
+    
+    try:
+        background_tasks.add_task(run_multi_format_processing_from_config)
+        logger.info(f"[{request_id}] Multi-format processing task scheduled successfully")
+        
+        # Проверяем, является ли запрос AJAX запросом
+        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        
+        if is_ajax:
+            # Для AJAX запросов возвращаем JSON ответ
+            return JSONResponse(content={"status": "processing_started"})
+        else:
+            # Для обычных запросов возвращаем редирект
+            return RedirectResponse(url="/settings?msg=processing_started", status_code=303)
+            
+    except Exception as e:
+        logger.exception(f"[{request_id}] Error scheduling multi-format processing task: {str(e)}")
+        # Проверяем, является ли запрос AJAX запросом
+        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+        
+        if is_ajax:
+            # Для AJAX запросов возвращаем JSON ответ
+            return JSONResponse(content={"status": "error", "message": "Ошибка запуска обработки файлов"})
+        else:
+            # Для обычных запросов возвращаем редирект с сообщением об ошибке
+            return RedirectResponse(url="/settings?msg=processing_error", status_code=303)

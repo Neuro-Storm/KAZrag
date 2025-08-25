@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import List
+from typing import List, Dict, Any
 try:
     from docx import Document
     HAS_PYTHON_DOCX = True
@@ -54,6 +54,51 @@ class DocxConverter(BaseConverter):
         except Exception as e:
             logger.error(f"Error converting DOCX file {file_path.name}: {e}")
             raise
+    
+    def extract_metadata(self, file_path: Path) -> Dict[str, Any]:
+        """
+        Extract metadata from a DOCX file.
+        
+        Args:
+            file_path (Path): Path to the DOCX file
+            
+        Returns:
+            Dict[str, Any]: Dictionary with extracted metadata
+        """
+        if not HAS_PYTHON_DOCX:
+            logger.warning("python-docx is not available for metadata extraction")
+            return {}
+            
+        if not file_path.exists():
+            logger.warning(f"File not found for metadata extraction: {file_path}")
+            return {}
+            
+        try:
+            doc = Document(file_path)
+            # Extract standard metadata
+            core_props = doc.core_properties
+            metadata = {
+                "title": core_props.title,
+                "author": core_props.author,
+                "subject": core_props.subject,
+                "creator": core_props.creator,
+                "keywords": core_props.keywords,
+                "description": core_props.description,
+                "category": core_props.category,
+                "created": core_props.created.isoformat() if core_props.created else None,
+                "modified": core_props.modified.isoformat() if core_props.modified else None,
+            }
+            # Filter out None values
+            metadata = {k: v for k, v in metadata.items() if v is not None}
+            
+            # Add approximate paragraph count
+            paragraph_count = len(doc.paragraphs)
+            metadata["approximate_paragraph_count"] = paragraph_count
+            
+            return metadata
+        except Exception as e:
+            logger.warning(f"Error extracting metadata from DOCX file {file_path.name}: {e}")
+            return {}
     
     def _docx_to_markdown(self, doc) -> str:
         """Convert DOCX document to Markdown format."""

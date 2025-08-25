@@ -3,22 +3,35 @@
 import logging
 from pathlib import Path
 from typing import List, Tuple
-from config.settings import load_config, Config
+from config.config_manager import ConfigManager
 
 # Import the PDF converter
 from .pdf_to_md_chunker import process_pdfs_and_chunk
 # Import the new converter manager
 from .converters.manager import ConverterManager
+# Import the new file processor
+from .file_processor import FileProcessor, FileType
 
 logger = logging.getLogger(__name__)
 
-# Initialize the converter manager
-converter_manager = ConverterManager()
+# Get singleton instance of ConfigManager
+config_manager = ConfigManager.get_instance()
+
+# Lazy initialization of converter manager
+_converter_manager = None
+
+
+def _get_converter_manager():
+    """Get or create converter manager instance."""
+    global _converter_manager
+    if _converter_manager is None:
+        _converter_manager = ConverterManager()
+    return _converter_manager
 
 
 def convert_files_to_md(input_dir: str, output_dir: str) -> Tuple[bool, str]:
     """
-    Convert files of various formats to Markdown.
+    Convert files of various formats to Markdown using the new FileProcessor.
     
     Args:
         input_dir (str): Directory containing files to convert
@@ -37,121 +50,28 @@ def convert_files_to_md(input_dir: str, output_dir: str) -> Tuple[bool, str]:
         # Create output directory if it doesn't exist
         output_path.mkdir(parents=True, exist_ok=True)
         
-        # Get all files in the input directory
-        files = [f for f in input_path.iterdir() if f.is_file()]
+        # Initialize file processor
+        file_processor = FileProcessor()
         
-        if not files:
-            logger.info(f"No files found in {input_dir}")
-            return True, "no_files_found"
+        # Scan directory for files
+        files_by_type = file_processor.scan_directory(input_path, recursive=True)
         
-        # Categorize files by type
-        pdf_files = [f for f in files if f.suffix.lower() == '.pdf']
-        djvu_files = [f for f in files if f.suffix.lower() == '.djvu']
-        image_files = [f for f in files if f.suffix.lower() in ['.jpg', '.jpeg', '.png']]
-        other_files = [f for f in files if f.suffix.lower() not in ['.pdf', '.djvu', '.jpg', '.jpeg', '.png']]
+        # Get statistics
+        stats = file_processor.get_statistics(files_by_type)
+        logger.info(f"Found files: {stats}")
         
         # Process files
-        processed_count = 0
+        results = file_processor.process_files(files_by_type, output_path, _get_converter_manager())
         
-        # Process DJVU files (convert to PDF first)
-        if djvu_files:
-            logger.info(f"Processing {len(djvu_files)} DJVU files")
-            for djvu_file in djvu_files:
-                try:
-                    # Convert DJVU to PDF
-                    pdf_paths = converter_manager.convert_file(djvu_file, input_path)
-                    if pdf_paths:
-                        pdf_files.extend(pdf_paths)  # Add converted PDFs to PDF processing queue
-                        processed_count += 1
-                except Exception as e:
-                    logger.error(f"Error converting DJVU {djvu_file.name}: {e}")
+        # Count successful conversions
+        successful_conversions = sum(1 for result in results if result.success)
+        failed_conversions = len(results) - successful_conversions
         
-        # Process PDF files (including converted DJVU files) using MinerU
-        if pdf_files:
-            logger.info(f"Processing {len(pdf_files)} PDF files with MinerU")
-            # Load config for PDF processing settings
-            config: Config = load_config()
+        if failed_conversions > 0:
+            logger.warning(f"{failed_conversions} files failed to convert")
             
-            # Process each PDF file
-            for pdf_file in pdf_files:
-                try:
-                    pdf_output_dir = output_path / pdf_file.stem
-                    pdf_output_dir.mkdir(exist_ok=True)
-                    
-                    process_pdfs_and_chunk(
-                        input_pdf_dir=str(pdf_file.parent),
-                        output_md_dir=str(pdf_output_dir),
-                        enable_formula_parsing=config.mineru_enable_formula_parsing,
-                        enable_table_parsing=config.mineru_enable_table_parsing,
-                        model_source=config.mineru_model_source,
-                        models_dir=config.mineru_models_dir if config.mineru_models_dir else None,
-                        backend=config.mineru_backend,
-                        method=config.mineru_method,
-                        lang=config.mineru_lang,
-                        sglang_url=config.mineru_sglang_url if config.mineru_sglang_url else None,
-                        device=config.device
-                    )
-                    processed_count += 1
-                except Exception as e:
-                    logger.error(f"Error processing PDF {pdf_file.name}: {e}")
-        
-        # Process image files using MinerU
-        if image_files:
-            logger.info(f"Processing {len(image_files)} image files with MinerU")
-            # Load config for PDF processing settings
-            config: Config = load_config()
-            
-            # Create a temporary directory for image processing
-            temp_image_dir = input_path / "temp_images"
-            temp_image_dir.mkdir(exist_ok=True)
-            
-            try:
-                # Move image files to temp directory
-                for image_file in image_files:
-                    temp_image_path = temp_image_dir / image_file.name
-                    image_file.rename(temp_image_path)
-                
-                # Process images as PDFs using MinerU
-                try:
-                    image_output_dir = output_path / "images_processed"
-                    image_output_dir.mkdir(exist_ok=True)
-                    
-                    process_pdfs_and_chunk(
-                        input_pdf_dir=str(temp_image_dir),
-                        output_md_dir=str(image_output_dir),
-                        enable_formula_parsing=config.mineru_enable_formula_parsing,
-                        enable_table_parsing=config.mineru_enable_table_parsing,
-                        model_source=config.mineru_model_source,
-                        models_dir=config.mineru_models_dir if config.mineru_models_dir else None,
-                        backend=config.mineru_backend,
-                        method=config.mineru_method,
-                        lang=config.mineru_lang,
-                        sglang_url=config.mineru_sglang_url if config.mineru_sglang_url else None,
-                        device=config.device
-                    )
-                    processed_count += len(image_files)
-                except Exception as e:
-                    logger.error(f"Error processing images: {e}")
-            finally:
-                # Move image files back and clean up temp directory
-                for temp_image_file in temp_image_dir.iterdir():
-                    if temp_image_file.is_file():
-                        original_path = input_path / temp_image_file.name
-                        temp_image_file.rename(original_path)
-                # Remove temp directory
-                if temp_image_dir.exists():
-                    temp_image_dir.rmdir()
-        
-        # Process other files using appropriate converters
-        for file_path in other_files:
-            try:
-                converter_manager.convert_file(file_path, output_path)
-                processed_count += 1
-            except Exception as e:
-                logger.error(f"Error converting {file_path.name}: {e}")
-        
-        logger.info(f"Successfully converted {processed_count} files to Markdown")
-        return True, f"converted_{processed_count}_files"
+        logger.info(f"Successfully converted {successful_conversions} files to Markdown")
+        return True, f"converted_{successful_conversions}_files"
         
     except Exception as e:
         logger.exception(f"Error converting files: {e}")
@@ -169,7 +89,7 @@ def get_supported_formats() -> List[str]:
     formats = ['.pdf', '.djvu', '.jpg', '.jpeg', '.png']
     
     # Add formats supported by our converters
-    formats.extend(converter_manager.get_supported_extensions())
+    formats.extend(_get_converter_manager().get_supported_extensions())
     
     # Remove duplicates and return
     return list(set(formats))

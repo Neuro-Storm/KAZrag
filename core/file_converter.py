@@ -2,7 +2,7 @@
 
 import logging
 from typing import Tuple
-from config.settings import load_config, Config
+from config.config_manager import ConfigManager
 # Импорт основной функции обработки из pdf_to_md_chunker (для обратной совместимости)
 from .pdf_to_md_chunker import process_pdfs_and_chunk
 # Импорт функции get_device из embeddings, чтобы не дублировать код
@@ -12,6 +12,9 @@ from .multi_format_converter import convert_files_to_md
 
 logger = logging.getLogger(__name__)
 
+# Get singleton instance of ConfigManager
+config_manager = ConfigManager.get_instance()
+
 
 def run_pdf_processing_from_config() -> Tuple[bool, str]:
     """
@@ -20,7 +23,7 @@ def run_pdf_processing_from_config() -> Tuple[bool, str]:
     Returns:
         Tuple[bool, str]: (успех, статус)
     """
-    config: Config = load_config()
+    config = config_manager.get()
     try:
         # Вызов функции обработки
         process_pdfs_and_chunk(
@@ -49,7 +52,7 @@ def run_multi_format_processing_from_config() -> Tuple[bool, str]:
     Returns:
         Tuple[bool, str]: (успех, статус)
     """
-    config: Config = load_config()
+    config = config_manager.get()
     try:
         # Вызов функции обработки для всех форматов
         success, status = convert_files_to_md(
