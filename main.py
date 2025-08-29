@@ -8,9 +8,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Импорт модулей для настройки приложения
-from app_factory import create_app
-from logging_config import setup_logging
-from startup import startup_event_handler
+from app.app_factory import create_app
+from config.logging_config import setup_logging
+from app.startup import startup_event_handler
 
 # Настройка логирования через централизованный модуль
 setup_logging()
@@ -29,27 +29,9 @@ if fastembed_cache_dir:
 # Создание основного приложения FastAPI через фабрику
 app = create_app()
 
-# Register a middleware to generate request IDs
-@app.middleware("http")
-async def add_request_id(request, call_next):
-    import uuid
-    from fastapi import Request
-    
-    # Generate a unique request ID and attach it to the request state
-    request_id = str(uuid.uuid4())
-    request.state.request_id = request_id
-    
-    # Process the request
-    response = await call_next(request)
-    
-    return response
 
-# Add favicon.ico route to prevent 404 errors
-@app.get("/favicon.ico")
-async def favicon():
-    """Favicon route - returns 204 No Content to prevent 404 errors"""
-    from fastapi.responses import Response
-    return Response(status_code=204)
+
+
 
 # Регистрация обработчиков событий запуска и остановки
 @app.on_event("startup")

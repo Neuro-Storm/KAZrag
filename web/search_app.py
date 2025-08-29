@@ -7,11 +7,11 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 # Qdrant client is provided via dependency injection (get_client)
 
-from core.searcher import search_in_collection
-from core.qdrant_collections import get_cached_collections
+from core.search.searcher import search_in_collection
+from core.qdrant.qdrant_collections import get_cached_collections
 from config.settings import Config
-from core.dependencies import get_config, get_client
-from core.exception_handlers import get_request_id
+from core.utils.dependencies import get_config, get_client
+from core.utils.exception_handlers import get_request_id
 
 logger = logging.getLogger(__name__)
 

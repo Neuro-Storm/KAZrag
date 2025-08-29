@@ -8,8 +8,8 @@ import json
 import os
 
 
-# Set ADMIN_API_KEY for tests
-os.environ["ADMIN_API_KEY"] = "test_key"
+# Set ADMIN_API_KEY for testing
+os.environ["ADMIN_API_KEY"] = "test_api_key"
 
 
 class TestSearchRoutes:
@@ -19,7 +19,7 @@ class TestSearchRoutes:
     def app(self):
         """Create a test FastAPI app."""
         # Import the app factory
-        from app_factory import create_app
+        from app.app_factory import create_app
         return create_app()
 
     @pytest.fixture
@@ -89,7 +89,7 @@ class TestAdminRoutes:
     def app(self):
         """Create a test FastAPI app."""
         # Import the app factory
-        from app_factory import create_app
+        from app.app_factory import create_app
         return create_app()
 
     @pytest.fixture

@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import Mock, patch, MagicMock
 import json
-from app_factory import create_app
+from app.app_factory import create_app
 from config.settings import Config
 from core.searcher import search_in_collection
 from langchain_core.documents import Document

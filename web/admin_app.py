@@ -3,7 +3,9 @@
 import os
 import logging
 import uuid
+import time
 from typing import Optional
+from pathlib import Path
 from fastapi import APIRouter, Form, Request, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
@@ -13,13 +15,16 @@ from dotenv import load_dotenv
 
 from config.config_manager import ConfigManager
 from config.settings import Config
-from core.indexer import run_indexing_logic
-from core.file_converter import run_pdf_processing_from_config, run_multi_format_processing_from_config
-from core.qdrant_collections import get_cached_collections, refresh_collections_cache
-from core.dependencies import get_config, get_client
-from core.exception_handlers import get_request_id
+from core.indexing.indexer import run_indexing_logic
+from core.converting.file_converter import run_pdf_processing_from_config, run_multi_format_processing_from_config
+from core.qdrant.qdrant_collections import get_cached_collections, refresh_collections_cache
+from core.utils.dependencies import get_config, get_client
+from core.utils.exception_handlers import get_request_id
 
 logger = logging.getLogger(__name__)
+
+# Rate limiting storage (in production, use Redis or similar)
+_rate_limit_storage = {}
 
 # Инициализация APIRouter
 app = APIRouter()
@@ -46,23 +51,70 @@ ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
 config_manager = ConfigManager.get_instance()
 
 
+def _check_rate_limit(ip: str, max_requests: int = 10, window: int = 60) -> bool:
+    """
+    Проверяет, не превышен ли лимит запросов для IP адреса.
+    
+    Args:
+        ip: IP адрес клиента
+        max_requests: Максимальное количество запросов за окно
+        window: Окно времени в секундах
+        
+    Returns:
+        bool: True если лимит не превышен, False если превышен
+    """
+    current_time = time.time()
+    if ip not in _rate_limit_storage:
+        _rate_limit_storage[ip] = []
+    
+    # Удаляем старые записи
+    _rate_limit_storage[ip] = [
+        timestamp for timestamp in _rate_limit_storage[ip]
+        if current_time - timestamp < window
+    ]
+    
+    # Проверяем лимит
+    if len(_rate_limit_storage[ip]) >= max_requests:
+        return False
+    
+    # Добавляем текущий запрос
+    _rate_limit_storage[ip].append(current_time)
+    return True
+
+
 def update_index_settings(form_data: dict, config: Config):
     """Обновляет настройки индексации."""
     model_changed = False
     device_changed = False
     
-    # Валидация обязательных полей
-    if form_data.get("folder_path") is None or not form_data["folder_path"].strip():
-        raise HTTPException(400, detail="Путь к папке не может быть пустым")
-    config.folder_path = form_data["folder_path"].strip()
+    # Определяем функцию для работы с чекбоксами
+    def form_bool(key: str) -> bool:
+        # Checkbox присутствует в форме -> treated as True. Also accept explicit 'True'/'true' values.
+        if key in form_data:
+            val = form_data.get(key)
+            if isinstance(val, str):
+                return val.lower() in ("true", "1", "on")
+            return True
+        return False
     
-    if form_data.get("collection_name") is None or not form_data["collection_name"].strip():
-        raise HTTPException(400, detail="Имя коллекции не может быть пустым")
-    config.collection_name = form_data["collection_name"].strip()
+    # Обновляем только те поля, которые переданы в форме
+    if "folder_path" in form_data and form_data["folder_path"] is not None:
+        folder_path = form_data["folder_path"].strip()
+        if not folder_path:
+            raise HTTPException(400, detail="Путь к папке не может быть пустым")
+        config.folder_path = folder_path
     
-    if form_data.get("hf_model") is None or not form_data["hf_model"].strip():
-        raise HTTPException(400, detail="Модель не может быть пустой")
-    config.current_hf_model = form_data["hf_model"].strip()
+    if "collection_name" in form_data and form_data["collection_name"] is not None:
+        collection_name = form_data["collection_name"].strip()
+        if not collection_name:
+            raise HTTPException(400, detail="Имя коллекции не может быть пустым")
+        config.collection_name = collection_name
+    
+    if "hf_model" in form_data and form_data["hf_model"] is not None:
+        hf_model = form_data["hf_model"].strip()
+        if not hf_model:
+            raise HTTPException(400, detail="Модель не может быть пустой")
+        config.current_hf_model = hf_model
     
     if form_data.get("chunk_size") is not None:
         try:
@@ -88,6 +140,97 @@ def update_index_settings(form_data: dict, config: Config):
         except ValueError:
             # Можно добавить flash сообщение об ошибке
             raise HTTPException(400, detail="Неверный размер батча для индексации")
+    
+    # Новые параметры для чанкинга
+    if form_data.get("chunking_strategy") is not None:
+        config.chunking_strategy = form_data["chunking_strategy"]
+    if form_data.get("paragraphs_per_chunk") is not None:
+        try:
+            config.paragraphs_per_chunk = int(form_data["paragraphs_per_chunk"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное количество абзацев в чанке")
+    if form_data.get("paragraph_overlap") is not None:
+        try:
+            config.paragraph_overlap = int(form_data["paragraph_overlap"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное перекрытие абзацев")
+    if form_data.get("sentences_per_chunk") is not None:
+        try:
+            config.sentences_per_chunk = int(form_data["sentences_per_chunk"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное количество предложений в чанке")
+    if form_data.get("sentence_overlap") is not None:
+        try:
+            config.sentence_overlap = int(form_data["sentence_overlap"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное перекрытие предложений")
+    
+    # Параметры для многоуровневого чанкинга
+    config.use_multilevel_chunking = form_bool("use_multilevel_chunking")
+    if form_data.get("multilevel_macro_strategy") is not None:
+        config.multilevel_macro_strategy = form_data["multilevel_macro_strategy"]
+    if form_data.get("multilevel_macro_chunk_size") is not None:
+        try:
+            config.multilevel_macro_chunk_size = int(form_data["multilevel_macro_chunk_size"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверный размер макро-чанка")
+    if form_data.get("multilevel_macro_chunk_overlap") is not None:
+        try:
+            config.multilevel_macro_chunk_overlap = int(form_data["multilevel_macro_chunk_overlap"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное перекрытие макро-чанков")
+    if form_data.get("multilevel_macro_paragraphs_per_chunk") is not None:
+        try:
+            config.multilevel_macro_paragraphs_per_chunk = int(form_data["multilevel_macro_paragraphs_per_chunk"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное количество абзацев в макро-чанке")
+    if form_data.get("multilevel_macro_paragraph_overlap") is not None:
+        try:
+            config.multilevel_macro_paragraph_overlap = int(form_data["multilevel_macro_paragraph_overlap"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное перекрытие абзацев в макро-чанках")
+    if form_data.get("multilevel_macro_sentences_per_chunk") is not None:
+        try:
+            config.multilevel_macro_sentences_per_chunk = int(form_data["multilevel_macro_sentences_per_chunk"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное количество предложений в макро-чанке")
+    if form_data.get("multilevel_macro_sentence_overlap") is not None:
+        try:
+            config.multilevel_macro_sentence_overlap = int(form_data["multilevel_macro_sentence_overlap"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное перекрытие предложений в макро-чанках")
+    if form_data.get("multilevel_micro_strategy") is not None:
+        config.multilevel_micro_strategy = form_data["multilevel_micro_strategy"]
+    if form_data.get("multilevel_micro_chunk_size") is not None:
+        try:
+            config.multilevel_micro_chunk_size = int(form_data["multilevel_micro_chunk_size"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверный размер микро-чанка")
+    if form_data.get("multilevel_micro_chunk_overlap") is not None:
+        try:
+            config.multilevel_micro_chunk_overlap = int(form_data["multilevel_micro_chunk_overlap"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное перекрытие микро-чанков")
+    if form_data.get("multilevel_micro_paragraphs_per_chunk") is not None:
+        try:
+            config.multilevel_micro_paragraphs_per_chunk = int(form_data["multilevel_micro_paragraphs_per_chunk"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное количество абзацев в микро-чанке")
+    if form_data.get("multilevel_micro_paragraph_overlap") is not None:
+        try:
+            config.multilevel_micro_paragraph_overlap = int(form_data["multilevel_micro_paragraph_overlap"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное перекрытие абзацев в микро-чанках")
+    if form_data.get("multilevel_micro_sentences_per_chunk") is not None:
+        try:
+            config.multilevel_micro_sentences_per_chunk = int(form_data["multilevel_micro_sentences_per_chunk"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное количество предложений в микро-чанке")
+    if form_data.get("multilevel_micro_sentence_overlap") is not None:
+        try:
+            config.multilevel_micro_sentence_overlap = int(form_data["multilevel_micro_sentence_overlap"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное перекрытие предложений в микро-чанках")
     
     # use_dense теперь bool
     # legacy fields and new explicit index flags
@@ -228,9 +371,18 @@ def update_advanced_settings(form_data: dict, config: Config):
             raise HTTPException(400, detail="Неверный таймаут subprocess вызова mineru")
 
 
-async def verify_admin_access_from_form(credentials: HTTPBasicCredentials = Depends(security)):
+async def verify_admin_access_from_form(request: Request, credentials: HTTPBasicCredentials = Depends(security)):
     """Проверяет учетные данные для доступа к админке."""
-    request_id = getattr(credentials, "request_id", str(uuid.uuid4())) if hasattr(credentials, '__dict__') else str(uuid.uuid4())
+    request_id = get_request_id(request)
+    
+    # Проверка rate-limit
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip, max_requests=10, window=60):
+        logger.warning(f"[{request_id}] Rate limit exceeded for IP: {client_ip}")
+        raise HTTPException(
+            status_code=429,
+            detail="Превышен лимит запросов. Попробуйте позже.",
+        )
     
     # Если API ключ не установлен в .env, разрешаем доступ без аутентификации
     if not ADMIN_API_KEY:
@@ -322,47 +474,6 @@ async def delete_collection(request: Request, collection_name: str = Form(...), 
 @app.post("/update-settings", response_class=RedirectResponse)
 async def update_settings(
     request: Request,
-    # --- Поля индексации ---
-    folder_path: str = Form(None), # Используем None как значение по умолчанию
-    collection_name: str = Form(None),
-    hf_model: str = Form(None),
-    chunk_size: str = Form(None), # Принимаем как строку, проверим и преобразуем позже
-    embedding_batch_size: str = Form(None),
-    indexing_batch_size: str = Form(None),
-    chunk_overlap: str = Form(None),
-    use_dense: bool = Form(False), # Checkbox
-    device: str = Form(None),
-    # --- Поля MinerU ---
-    mineru_input_pdf_dir: str = Form(None),
-    mineru_output_md_dir: str = Form(None),
-    mineru_enable_formula_parsing: bool = Form(False), # Checkbox
-    mineru_enable_table_parsing: bool = Form(False),   # Checkbox
-    mineru_model_source: str = Form(None),
-    mineru_models_dir: Optional[str] = Form(None),
-    mineru_backend: str = Form(None),
-    mineru_method: str = Form(None),
-    mineru_lang: str = Form(None),
-    mineru_sglang_url: Optional[str] = Form(None),
-    # --- Дополнительные поля ---
-    # Настройки кэширования
-    config_cache_ttl: str = Form(None),
-    qdrant_client_cache_ttl: str = Form(None),
-    collections_cache_ttl: str = Form(None),
-    # Настройки GGUF моделей
-    gguf_model_n_ctx: str = Form(None),
-    # Настройки поиска
-    search_default_k: str = Form(None),
-    # Настройки подключения к Qdrant
-    qdrant_url: str = Form(None),
-    qdrant_retry_attempts: str = Form(None),
-    qdrant_retry_wait_time: str = Form(None),
-    # Настройки индексации документов
-    memory_threshold: str = Form(None),
-    indexing_default_batch_size: str = Form(None),
-    sparse_embedding: str = Form(None),
-    # Настройки MinerU (дополнительные)
-    mineru_subprocess_timeout: str = Form(None),
-    # --- Новое поле для определения действия ---
     action: str = Form(...), # Это поле будет определять, какие настройки сохранять
     username: str = Depends(verify_admin_access_from_form),
     config: Config = Depends(get_config)
@@ -374,57 +485,24 @@ async def update_settings(
     try:
         # Импортируем кэш для сброса при смене модели или устройства
         
-        # Собираем данные формы в словарь
-        form_data = {
-            "folder_path": folder_path,
-            "collection_name": collection_name,
-            "hf_model": hf_model,
-            "chunk_size": chunk_size,
-            "embedding_batch_size": embedding_batch_size,
-            "indexing_batch_size": indexing_batch_size,
-            "chunk_overlap": chunk_overlap,
-            "use_dense": use_dense,
-            "device": device,
-            "mineru_input_pdf_dir": mineru_input_pdf_dir,
-            "mineru_output_md_dir": mineru_output_md_dir,
-            "mineru_enable_formula_parsing": mineru_enable_formula_parsing,
-            "mineru_enable_table_parsing": mineru_enable_table_parsing,
-            "mineru_model_source": mineru_model_source,
-            "mineru_models_dir": mineru_models_dir,
-            "mineru_backend": mineru_backend,
-            "mineru_method": mineru_method,
-            "mineru_lang": mineru_lang,
-            "mineru_sglang_url": mineru_sglang_url,
-            # Дополнительные поля
-            "config_cache_ttl": config_cache_ttl,
-            "qdrant_client_cache_ttl": qdrant_client_cache_ttl,
-            "collections_cache_ttl": collections_cache_ttl,
-            "gguf_model_n_ctx": gguf_model_n_ctx,
-            "search_default_k": search_default_k,
-            "qdrant_url": qdrant_url,
-            "qdrant_retry_attempts": qdrant_retry_attempts,
-            "qdrant_retry_wait_time": qdrant_retry_wait_time,
-            "memory_threshold": memory_threshold,
-            "indexing_default_batch_size": indexing_default_batch_size,
-            "sparse_embedding": sparse_embedding,
-            "mineru_subprocess_timeout": mineru_subprocess_timeout,
-        }
-        # Получаем все поля исходной формы (включая чекбоксы, которые могут отсутствовать в аргументах функции)
+        # Получаем все поля формы
         try:
             raw_form = await request.form()
         except Exception:
             raw_form = {}
 
+        # Собираем данные формы в словарь только из фактически переданных полей
+        form_data = dict(raw_form)
         def form_bool(key: str) -> bool:
             # Checkbox присутствует в форме -> treated as True. Also accept explicit 'True'/'true' values.
-            if key in raw_form:
-                val = raw_form.get(key)
+            if key in form_data:
+                val = form_data.get(key)
                 if isinstance(val, str):
                     return val.lower() in ("true", "1", "on")
                 return True
             return False
 
-        # Populate explicit index flags from raw form
+        # Populate explicit index flags from form data
         form_data["index_dense"] = form_bool("index_dense")
         form_data["index_bm25"] = form_bool("index_bm25")
         form_data["index_hybrid"] = form_bool("index_hybrid")
@@ -433,7 +511,7 @@ async def update_settings(
         form_data["use_hybrid"] = form_bool("use_hybrid") or form_data.get("use_hybrid", False)
         
         # Handle new indexing_type parameter
-        indexing_type = raw_form.get("indexing_type")
+        indexing_type = form_data.get("indexing_type")
         if indexing_type == "dense":
             form_data["index_dense"] = True
             form_data["index_bm25"] = False
@@ -528,6 +606,26 @@ async def process_pdfs_endpoint(request: Request, background_tasks: BackgroundTa
     request_id = get_request_id(request)
     logger.info(f"[{request_id}] Process PDFs request by user: {username}")
     
+    # Проверка наличия файлов и их размера
+    try:
+        form = await request.form()
+        files = form.getlist("files")
+        if not files:
+            logger.warning(f"[{request_id}] No files provided for PDF processing")
+            raise HTTPException(status_code=400, detail="Файлы не предоставлены")
+        
+        # Проверка размера файлов (например, ограничение 100MB)
+        MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+        for file in files:
+            if hasattr(file, 'size') and file.size > MAX_FILE_SIZE:
+                logger.warning(f"[{request_id}] File {file.filename} exceeds size limit")
+                raise HTTPException(status_code=400, detail=f"Файл {file.filename} слишком большой")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"[{request_id}] Error checking files for PDF processing: {str(e)}")
+        raise HTTPException(status_code=400, detail="Ошибка проверки файлов")
+    
     try:
         background_tasks.add_task(run_pdf_processing_from_config)
         logger.info(f"[{request_id}] PDF processing task scheduled successfully")
@@ -561,6 +659,35 @@ async def process_files_endpoint(request: Request, background_tasks: BackgroundT
     """Запускает процесс обработки файлов различных форматов."""
     request_id = get_request_id(request)
     logger.info(f"[{request_id}] Process files request by user: {username}")
+    
+    # Проверка наличия файлов и их размера
+    try:
+        form = await request.form()
+        files = form.getlist("files")
+        if not files:
+            logger.warning(f"[{request_id}] No files provided for multi-format processing")
+            raise HTTPException(status_code=400, detail="Файлы не предоставлены")
+        
+        # Проверка размера файлов (например, ограничение 100MB)
+        MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
+        for file in files:
+            if hasattr(file, 'size') and file.size > MAX_FILE_SIZE:
+                logger.warning(f"[{request_id}] File {file.filename} exceeds size limit")
+                raise HTTPException(status_code=400, detail=f"Файл {file.filename} слишком большой")
+                
+        # Проверка типов файлов (например, только PDF, DOCX, TXT)
+        ALLOWED_EXTENSIONS = {'.pdf', '.docx', '.txt', '.md'}
+        for file in files:
+            if hasattr(file, 'filename'):
+                ext = Path(file.filename).suffix.lower()
+                if ext not in ALLOWED_EXTENSIONS:
+                    logger.warning(f"[{request_id}] File {file.filename} has unsupported extension")
+                    raise HTTPException(status_code=400, detail=f"Файл {file.filename} имеет неподдерживаемый формат")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"[{request_id}] Error checking files for multi-format processing: {str(e)}")
+        raise HTTPException(status_code=400, detail="Ошибка проверки файлов")
     
     try:
         background_tasks.add_task(run_multi_format_processing_from_config)

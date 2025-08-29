@@ -2,9 +2,9 @@
 
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from core.collection_analyzer import CollectionAnalyzer, SearchError
-from core.search_strategy import SearchStrategy
-from core.search_executor import SearchExecutor
+from core.search.collection_analyzer import CollectionAnalyzer, SearchError
+from core.search.search_strategy import SearchStrategy
+from core.search.search_executor import SearchExecutor
 from langchain_qdrant import QdrantVectorStore
 
 
@@ -118,7 +118,7 @@ class TestSearchStrategy:
         strategy.has_dense = True
         strategy.has_sparse = False
         
-        with patch('core.search_strategy.logger.warning') as mock_warning:
+        with patch('core.search.search_strategy.logger.warning') as mock_warning:
             mode = strategy.determine_search_mode(hybrid=True)
             assert mode == "dense"
             mock_warning.assert_called_once()

@@ -11,10 +11,10 @@ sys.path.append(str(Path(__file__).parent))
 
 # Import required modules
 from config.settings import load_config, Config
-from core.searcher import search_in_collection
-from core.qdrant_client import get_qdrant_client
-from core.qdrant_collections import get_cached_collections
-from logging_config import setup_logging
+from core.search.searcher import search_in_collection
+from core.qdrant.qdrant_client import get_qdrant_client
+from core.qdrant.qdrant_collections import get_cached_collections
+from config.logging_config import setup_logging
 
 logger = logging.getLogger(__name__)
 

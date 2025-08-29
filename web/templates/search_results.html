@@ -1,15 +1,40 @@
 {% if results %}
     <h2>Результаты поиска ({{ results|length }}):</h2>
-    {% for doc, score in results %}
+    {% for result, score in results %}
         <article>
-            <header><b>Источник:</b> {{ doc.metadata.get('source', 'N/A') }} | <b>Сходство:</b> <mark>{{ '%.4f'|format(score) }}</mark></header>
-            <p>{{ doc.page_content }}</p>
+            <header>
+                <b>Источник:</b> 
+                {% if result.source %}
+                    {{ result.source }}
+                {% elif result.metadata.source %}
+                    {{ result.metadata.source }}
+                {% else %}
+                    N/A
+                {% endif %}
+                | <b>Сходство:</b> <mark>{{ '%.4f'|format(score) }}</mark>
+            </header>
+            
+            <!-- Отображаем содержимое чанка -->
+            <p>{{ result.content or result.page_content or "Содержимое недоступно" }}</p>
+            
+            <!-- Отображаем микро-чанки, если они есть -->
+            {% if result.micro_contents %}
+                <details>
+                    <summary>Микро-чанки ({{ result.micro_contents|length }})</summary>
+                    <ul>
+                        {% for micro_content in result.micro_contents %}
+                            <li>{{ micro_content }}</li>
+                        {% endfor %}
+                    </ul>
+                </details>
+            {% endif %}
+            
             <!-- Отображаем метаданные -->
-            {% if doc.metadata %}
+            {% if result.metadata %}
                 <details>
                     <summary>Метаданные</summary>
                     <ul>
-                        {% for key, value in doc.metadata.items() %}
+                        {% for key, value in result.metadata.items() %}
                             <li><b>{{ key }}:</b> {{ value }}</li>
                         {% endfor %}
                     </ul>

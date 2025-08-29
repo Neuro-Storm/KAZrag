@@ -1,5 +1,3 @@
-# Игнорировать план-график и подобные документы
-*.docx
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -58,40 +56,43 @@ coverage.xml
 # VS Code
 .vscode/
 
-# PDF and markdown artifacts
-pdfs_to_process/
-data_to_index/
-data_to_index1/
-
-# Models
-# Исключаем только кэш fastembed, но не другие файлы в папке models
-models/fastembed_cache/
-# Большие бинарные модели
-models/*.gguf
-
-# Environment file with secrets
+# Configuration files with secrets
+config/config.json
+config/*.json
 .env
-
-# Source code collection script and its output
-collect_source_code.py
-project_source_code.txt
 
 # OS files
 .DS_Store
 Thumbs.db
 
-# Etc files
-.docx
+# Лог-файлы
+logs/
+*.log
 
-# Исключение для обновленного плана-графика
-Обновленный_план-график_KAZrag.md
+# Автоматически сгенерированные файлы и директории
+# Исключаем только кэш fastembed, но не другие файлы в папке models
+models/fastembed_cache/
 
-# Игнорировать резервные файлы и временные файлы
+# Большие бинарные модели
+models/*.gguf
+
+# Временные и резервные файлы
 *.bak
 *~
 123.txt
 
-# Лог-файлы
-*.log
+# Документы Microsoft Word
+*.docx
 
+# Игнорировать резервные файлы и временные файлы
+Обновленный_план-график_KAZrag.md
 IMPLEMENTATION_PLAN.md
+
+# Директории с данными
+pdfs_to_process/
+data_to_index/
+data_to_index1/
+
+# Source code collection script and its output
+collect_source_code.py
+project_source_code.txt

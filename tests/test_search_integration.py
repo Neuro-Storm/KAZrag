@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import Mock, patch, MagicMock, AsyncMock
 import importlib
-from core.searcher import search_in_collection
+from core.search.searcher import search_in_collection
 from langchain_core.documents import Document
 
 
@@ -19,18 +19,18 @@ class TestSearchProcess:
         k = 5
         
         mock_results = [
-            (Document(page_content="Test result 1", metadata={"source": "doc1.txt"}), 0.9),
-            (Document(page_content="Test result 2", metadata={"source": "doc2.txt"}), 0.8)
+            ({'content': 'Test result 1', 'metadata': {"source": "doc1.txt"}, 'score': 0.9}, 0.9),
+            ({'content': 'Test result 2', 'metadata': {"source": "doc2.txt"}, 'score': 0.8}, 0.8)
         ]
         
         # Мокаем все зависимости
-        with patch('core.searcher.aget_qdrant_client') as mock_get_client:
-            with patch('core.searcher.load_config') as mock_load_config:
-                with patch('core.searcher.get_dense_embedder') as mock_get_embedder:
-                    with patch('core.searcher.get_search_device') as mock_get_device:
-                        with patch('core.searcher.CollectionAnalyzer') as mock_analyzer:
-                            with patch('core.searcher.SearchStrategy') as mock_strategy:
-                                with patch('core.searcher.SearchExecutor') as mock_executor:
+        with patch('core.search.searcher.aget_qdrant_client') as mock_get_client:
+            with patch('core.search.searcher.load_config') as mock_load_config:
+                with patch('core.search.searcher.get_dense_embedder') as mock_get_embedder:
+                    with patch('core.search.searcher.get_search_device') as mock_get_device:
+                        with patch('core.search.searcher.CollectionAnalyzer') as mock_analyzer:
+                            with patch('core.search.searcher.SearchStrategy') as mock_strategy:
+                                with patch('core.search.searcher.SearchExecutor') as mock_executor:
                                     # Настраиваем моки
                                     mock_client = Mock()
                                     mock_get_client.return_value = mock_client
@@ -85,13 +85,13 @@ class TestSearchProcess:
         ]
         
         # Мокаем все зависимости
-        with patch('core.searcher.aget_qdrant_client') as mock_get_client:
-            with patch('core.searcher.load_config') as mock_load_config:
-                with patch('core.searcher.get_dense_embedder') as mock_get_embedder:
-                    with patch('core.searcher.get_search_device') as mock_get_device:
-                        with patch('core.searcher.CollectionAnalyzer') as mock_analyzer:
-                            with patch('core.searcher.SearchStrategy') as mock_strategy:
-                                with patch('core.searcher.SearchExecutor') as mock_executor:
+        with patch('core.search.searcher.aget_qdrant_client') as mock_get_client:
+            with patch('core.search.searcher.load_config') as mock_load_config:
+                with patch('core.search.searcher.get_dense_embedder') as mock_get_embedder:
+                    with patch('core.search.searcher.get_search_device') as mock_get_device:
+                        with patch('core.search.searcher.CollectionAnalyzer') as mock_analyzer:
+                            with patch('core.search.searcher.SearchStrategy') as mock_strategy:
+                                with patch('core.search.searcher.SearchExecutor') as mock_executor:
                                     with patch('importlib.import_module') as mock_import_module:
                                         # Настраиваем моки
                                         mock_client = Mock()
@@ -150,18 +150,18 @@ class TestSearchProcess:
         k = 5
         
         mock_results = [
-            (Document(page_content="Sparse result 1", metadata={"source": "doc1.txt"}), 0.9),
-            (Document(page_content="Sparse result 2", metadata={"source": "doc2.txt"}), 0.8)
+            ({'content': 'Sparse result 1', 'metadata': {"source": "doc1.txt"}, 'score': 0.9}, 0.9),
+            ({'content': 'Sparse result 2', 'metadata': {"source": "doc2.txt"}, 'score': 0.8}, 0.8)
         ]
         
         # Мокаем все зависимости
-        with patch('core.searcher.aget_qdrant_client') as mock_get_client:
-            with patch('core.searcher.load_config') as mock_load_config:
-                with patch('core.searcher.get_dense_embedder') as mock_get_embedder:
-                    with patch('core.searcher.get_search_device') as mock_get_device:
-                        with patch('core.searcher.CollectionAnalyzer') as mock_analyzer:
-                            with patch('core.searcher.SearchStrategy') as mock_strategy:
-                                with patch('core.searcher.SearchExecutor') as mock_executor:
+        with patch('core.search.searcher.aget_qdrant_client') as mock_get_client:
+            with patch('core.search.searcher.load_config') as mock_load_config:
+                with patch('core.search.searcher.get_dense_embedder') as mock_get_embedder:
+                    with patch('core.search.searcher.get_search_device') as mock_get_device:
+                        with patch('core.search.searcher.CollectionAnalyzer') as mock_analyzer:
+                            with patch('core.search.searcher.SearchStrategy') as mock_strategy:
+                                with patch('core.search.searcher.SearchExecutor') as mock_executor:
                                     with patch('importlib.import_module') as mock_import_module:
                                         # Настраиваем моки
                                         mock_client = Mock()
@@ -225,20 +225,20 @@ class TestSearchProcess:
         }
         
         mock_results = [
-            (Document(page_content="Filtered result", metadata={
+            ({'content': 'Filtered result', 'metadata': {
                 "source": "doc1.txt", 
                 "author": "Test Author"
-            }), 0.9)
+            }, 'score': 0.9}, 0.9)
         ]
         
         # Мокаем все зависимости
-        with patch('core.searcher.aget_qdrant_client') as mock_get_client:
-            with patch('core.searcher.load_config') as mock_load_config:
-                with patch('core.searcher.get_dense_embedder') as mock_get_embedder:
-                    with patch('core.searcher.get_search_device') as mock_get_device:
-                        with patch('core.searcher.CollectionAnalyzer') as mock_analyzer:
-                            with patch('core.searcher.SearchStrategy') as mock_strategy:
-                                with patch('core.searcher.SearchExecutor') as mock_executor:
+        with patch('core.search.searcher.aget_qdrant_client') as mock_get_client:
+            with patch('core.search.searcher.load_config') as mock_load_config:
+                with patch('core.search.searcher.get_dense_embedder') as mock_get_embedder:
+                    with patch('core.search.searcher.get_search_device') as mock_get_device:
+                        with patch('core.search.searcher.CollectionAnalyzer') as mock_analyzer:
+                            with patch('core.search.searcher.SearchStrategy') as mock_strategy:
+                                with patch('core.search.searcher.SearchExecutor') as mock_executor:
                                     # Настраиваем моки
                                     mock_client = Mock()
                                     mock_get_client.return_value = mock_client
@@ -289,17 +289,17 @@ class TestSearchProcess:
         k = 10  # Переопределяем значение из конфига
         
         mock_results = [
-            (Document(page_content="Result 1", metadata={"source": "doc1.txt"}), 0.9)
+            ({"content": "Result 1", "metadata": {"source": "doc1.txt"}, "score": 0.9}, 0.9)
         ]
         
         # Мокаем все зависимости
-        with patch('core.searcher.aget_qdrant_client') as mock_get_client:
-            with patch('core.searcher.load_config') as mock_load_config:
-                with patch('core.searcher.get_dense_embedder') as mock_get_embedder:
-                    with patch('core.searcher.get_search_device') as mock_get_device:
-                        with patch('core.searcher.CollectionAnalyzer') as mock_analyzer:
-                            with patch('core.searcher.SearchStrategy') as mock_strategy:
-                                with patch('core.searcher.SearchExecutor') as mock_executor:
+        with patch('core.search.searcher.aget_qdrant_client') as mock_get_client:
+            with patch('core.search.searcher.load_config') as mock_load_config:
+                with patch('core.search.searcher.get_dense_embedder') as mock_get_embedder:
+                    with patch('core.search.searcher.get_search_device') as mock_get_device:
+                        with patch('core.search.searcher.CollectionAnalyzer') as mock_analyzer:
+                            with patch('core.search.searcher.SearchStrategy') as mock_strategy:
+                                with patch('core.search.searcher.SearchExecutor') as mock_executor:
                                     # Настраиваем моки
                                     mock_client = Mock()
                                     mock_get_client.return_value = mock_client
@@ -348,17 +348,17 @@ class TestSearchProcess:
         k = None  # Используем значение по умолчанию из конфига
         
         mock_results = [
-            (Document(page_content="Result 1", metadata={"source": "doc1.txt"}), 0.9)
+            ({"content": "Result 1", "metadata": {"source": "doc1.txt"}, "score": 0.9}, 0.9)
         ]
         
         # Мокаем все зависимости
-        with patch('core.searcher.aget_qdrant_client') as mock_get_client:
-            with patch('core.searcher.load_config') as mock_load_config:
-                with patch('core.searcher.get_dense_embedder') as mock_get_embedder:
-                    with patch('core.searcher.get_search_device') as mock_get_device:
-                        with patch('core.searcher.CollectionAnalyzer') as mock_analyzer:
-                            with patch('core.searcher.SearchStrategy') as mock_strategy:
-                                with patch('core.searcher.SearchExecutor') as mock_executor:
+        with patch('core.search.searcher.aget_qdrant_client') as mock_get_client:
+            with patch('core.search.searcher.load_config') as mock_load_config:
+                with patch('core.search.searcher.get_dense_embedder') as mock_get_embedder:
+                    with patch('core.search.searcher.get_search_device') as mock_get_device:
+                        with patch('core.search.searcher.CollectionAnalyzer') as mock_analyzer:
+                            with patch('core.search.searcher.SearchStrategy') as mock_strategy:
+                                with patch('core.search.searcher.SearchExecutor') as mock_executor:
                                     # Настраиваем моки
                                     mock_client = Mock()
                                     mock_get_client.return_value = mock_client
@@ -410,8 +410,8 @@ class TestSearchErrorHandling:
         device = "cpu"
         
         # Мокаем ошибку при создании клиента
-        with patch('core.searcher.aget_qdrant_client', side_effect=Exception("Client initialization failed")):
-            with patch('core.searcher.load_config') as mock_load_config:
+        with patch('core.search.searcher.aget_qdrant_client', side_effect=Exception("Client initialization failed")):
+            with patch('core.search.searcher.load_config') as mock_load_config:
                 mock_config = Mock()
                 mock_config.search_default_k = 5
                 mock_load_config.return_value = mock_config
@@ -430,11 +430,11 @@ class TestSearchErrorHandling:
         device = "cpu"
         
         # Мокаем все зависимости
-        with patch('core.searcher.aget_qdrant_client') as mock_get_client:
-            with patch('core.searcher.load_config') as mock_load_config:
-                with patch('core.searcher.get_dense_embedder') as mock_get_embedder:
-                    with patch('core.searcher.get_search_device') as mock_get_device:
-                        with patch('core.searcher.CollectionAnalyzer') as mock_analyzer:
+        with patch('core.search.searcher.aget_qdrant_client') as mock_get_client:
+            with patch('core.search.searcher.load_config') as mock_load_config:
+                with patch('core.search.searcher.get_dense_embedder') as mock_get_embedder:
+                    with patch('core.search.searcher.get_search_device') as mock_get_device:
+                        with patch('core.search.searcher.CollectionAnalyzer') as mock_analyzer:
                             # Настраиваем моки
                             mock_client = Mock()
                             mock_get_client.return_value = mock_client
@@ -466,11 +466,11 @@ class TestSearchErrorHandling:
         k = 5
         
         # Мокаем все зависимости
-        with patch('core.searcher.aget_qdrant_client') as mock_get_client:
-            with patch('core.searcher.load_config') as mock_load_config:
-                with patch('core.searcher.get_dense_embedder') as mock_get_embedder:
-                    with patch('core.searcher.get_search_device') as mock_get_device:
-                        with patch('core.searcher.CollectionAnalyzer') as mock_analyzer:
+        with patch('core.search.searcher.aget_qdrant_client') as mock_get_client:
+            with patch('core.search.searcher.load_config') as mock_load_config:
+                with patch('core.search.searcher.get_dense_embedder') as mock_get_embedder:
+                    with patch('core.search.searcher.get_search_device') as mock_get_device:
+                        with patch('core.search.searcher.CollectionAnalyzer') as mock_analyzer:
                             with patch('importlib.import_module', side_effect=Exception("Sparse embedding failed")):
                                 # Настраиваем моки
                                 mock_client = Mock()
@@ -504,13 +504,13 @@ class TestSearchErrorHandling:
         k = 5
         
         # Мокаем все зависимости
-        with patch('core.searcher.aget_qdrant_client') as mock_get_client:
-            with patch('core.searcher.load_config') as mock_load_config:
-                with patch('core.searcher.get_dense_embedder') as mock_get_embedder:
-                    with patch('core.searcher.get_search_device') as mock_get_device:
-                        with patch('core.searcher.CollectionAnalyzer') as mock_analyzer:
-                            with patch('core.searcher.SearchStrategy') as mock_strategy:
-                                with patch('core.searcher.SearchExecutor') as mock_executor:
+        with patch('core.search.searcher.aget_qdrant_client') as mock_get_client:
+            with patch('core.search.searcher.load_config') as mock_load_config:
+                with patch('core.search.searcher.get_dense_embedder') as mock_get_embedder:
+                    with patch('core.search.searcher.get_search_device') as mock_get_device:
+                        with patch('core.search.searcher.CollectionAnalyzer') as mock_analyzer:
+                            with patch('core.search.searcher.SearchStrategy') as mock_strategy:
+                                with patch('core.search.searcher.SearchExecutor') as mock_executor:
                                     # Настраиваем моки
                                     mock_client = Mock()
                                     mock_get_client.return_value = mock_client

@@ -9,11 +9,9 @@ from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-CONFIG_FILE = Path("config.json")
+CONFIG_FILE = Path("config/config.json")
 
-# --- Кэш для конфигурации ---
-_cached_config: Optional['Config'] = None
-_cached_config_time = 0
+
 
 # Значения по умолчанию для констант
 DEFAULT_MEMORY_THRESHOLD = 500 * 1024 * 1024  # 500MB
@@ -37,6 +35,32 @@ class Config(BaseModel):
     hf_model_history: List[str] = Field(default_factory=lambda: ["sentence-transformers/all-MiniLM-L6-v2"])
     chunk_size: int = 500
     chunk_overlap: int = 100
+    # Новые параметры для чанкинга
+    chunking_strategy: str = "character"  # "character", "paragraph" или "sentence"
+    # Параметры для чанкинга по абзацам
+    paragraphs_per_chunk: int = 3
+    paragraph_overlap: int = 1
+    # Параметры для чанкинга по предложениям
+    sentences_per_chunk: int = 5
+    sentence_overlap: int = 1
+    # Параметры для многоуровневого чанкинга
+    use_multilevel_chunking: bool = False
+    # Параметры макро-чанкинга
+    multilevel_macro_strategy: str = "character"  # "character", "paragraph" или "sentence"
+    multilevel_macro_chunk_size: int = 10000
+    multilevel_macro_chunk_overlap: int = 1000
+    multilevel_macro_paragraphs_per_chunk: int = 5
+    multilevel_macro_paragraph_overlap: int = 1
+    multilevel_macro_sentences_per_chunk: int = 10
+    multilevel_macro_sentence_overlap: int = 1
+    # Параметры микро-чанкинга
+    multilevel_micro_strategy: str = "character"  # "character", "paragraph" или "sentence"
+    multilevel_micro_chunk_size: int = 1000
+    multilevel_micro_chunk_overlap: int = 100
+    multilevel_micro_paragraphs_per_chunk: int = 3
+    multilevel_micro_paragraph_overlap: int = 1
+    multilevel_micro_sentences_per_chunk: int = 5
+    multilevel_micro_sentence_overlap: int = 1
     device: str = "auto"
     use_dense_vectors: bool = True
     # Новые отдельные режимы индексации
@@ -98,104 +122,16 @@ def load_config() -> Config:
     
     Если файл не существует, создает его с настройками по умолчанию.
     """
-    global _cached_config, _cached_config_time
-    
     from pydantic import ValidationError
+    from config.config_manager import ConfigManager
     
-    # Простая проверка времени без загрузки всего конфига
-    current_time = time.time()
-    if _cached_config is not None:
-        if current_time - _cached_config_time <= _cached_config.config_cache_ttl:
-            return _cached_config
-    
-    if not CONFIG_FILE.exists():
-        default_cfg = Config()
-        save_config(default_cfg)
-        _cached_config = default_cfg
-        _cached_config_time = current_time
-        return _cached_config
-        
-    with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-        config_dict = json.load(f)
-        
-    # Создаем объект Config из словаря
-    try:
-        config = Config(**config_dict)
-    except ValidationError as e:
-        logger.exception(f"Validation errors: {e.errors()}")
-        # Создаем конфигурацию по умолчанию и сохраняем её
-        config = Config()
-        save_config(config)
-        _cached_config = config
-        _cached_config_time = current_time
-        return _cached_config
-    except Exception as e:
-        logger.exception(f"Ошибка валидации конфигурации: {e}")
-        # Создаем конфигурацию по умолчанию и сохраняем её
-        config = Config()
-        save_config(config)
-        _cached_config = config
-        _cached_config_time = current_time
-        return _cached_config
-        
-    # Backwards compatibility: if new flags not provided, derive them from old ones
-    # (some older configs may only have use_dense_vectors/use_hybrid)
-    if 'index_dense' not in config_dict:
-        config.index_dense = config_dict.get('use_dense_vectors', True)
-    if 'index_bm25' not in config_dict:
-        # default False
-        config.index_bm25 = config_dict.get('index_bm25', False)
-    if 'index_hybrid' not in config_dict:
-        config.index_hybrid = config_dict.get('use_hybrid', False)
-    # Backwards compatibility for cache settings
-    if 'config_cache_ttl' not in config_dict:
-        config.config_cache_ttl = DEFAULT_CACHE_TTL
-    if 'qdrant_client_cache_ttl' not in config_dict:
-        config.qdrant_client_cache_ttl = DEFAULT_CACHE_TTL
-    if 'collections_cache_ttl' not in config_dict:
-        config.collections_cache_ttl = DEFAULT_CACHE_TTL
-    # Backwards compatibility for new settings
-    if 'mineru_subprocess_timeout' not in config_dict:
-        config.mineru_subprocess_timeout = DEFAULT_MINERU_SUBPROCESS_TIMEOUT
-    if 'gguf_model_n_ctx' not in config_dict:
-        config.gguf_model_n_ctx = DEFAULT_GGUF_MODEL_N_CTX
-    if 'search_default_k' not in config_dict:
-        config.search_default_k = DEFAULT_SEARCH_DEFAULT_K
-    if 'qdrant_retry_attempts' not in config_dict:
-        config.qdrant_retry_attempts = DEFAULT_RETRY_ATTEMPTS
-    if 'qdrant_retry_wait_time' not in config_dict:
-        config.qdrant_retry_wait_time = DEFAULT_RETRY_WAIT_TIME
-    if 'indexing_default_batch_size' not in config_dict:
-        config.indexing_default_batch_size = DEFAULT_INDEXING_DEFAULT_BATCH_SIZE
-    if 'memory_threshold' not in config_dict:
-        config.memory_threshold = DEFAULT_MEMORY_THRESHOLD
-    if 'qdrant_url' not in config_dict:
-        config.qdrant_url = DEFAULT_QDRANT_URL
-
-    # Проверяем доступность Qdrant через централизованный фабричный модуль
-    try:
-        from core.qdrant_client import get_qdrant_client
-        client = get_qdrant_client(config)
-        # Попытка подключения к Qdrant
-        client.get_collections()
-    except Exception as e:
-        raise RuntimeError(f"Qdrant не доступен по адресу {config.qdrant_url}. Проверьте, запущен ли сервис Qdrant. Ошибка: {e}")
-        
-    _cached_config = config
-    _cached_config_time = current_time
-    return _cached_config
+    config_manager = ConfigManager.get_instance()
+    return config_manager.get()
 
 
 def save_config(config: Config):
     """Сохраняет конфигурацию в файл config.json."""
-    global _cached_config, _cached_config_time
+    from config.config_manager import ConfigManager
     
-    # Преобразуем Config в словарь
-    config_dict = config.model_dump()
-    
-    with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-        json.dump(config_dict, f, indent=4, ensure_ascii=False)
-        
-    # Сбрасываем кэш, чтобы при следующем запросе конфигурация была перезагружена
-    _cached_config = None
-    _cached_config_time = 0
+    config_manager = ConfigManager.get_instance()
+    config_manager.save(config)
