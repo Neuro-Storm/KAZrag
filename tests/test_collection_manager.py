@@ -1,9 +1,11 @@
 """Unit tests for the CollectionManager class."""
 
-import pytest
 from unittest.mock import Mock, patch
-from core.collection_manager import CollectionManager, CollectionError
+
+import pytest
 from qdrant_client.models import CollectionInfo
+
+from core.collection_manager import CollectionError, CollectionManager
 
 
 class TestCollectionManager:

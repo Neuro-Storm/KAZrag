@@ -1,9 +1,11 @@
 """Unit tests for the EmbeddingManager class."""
 
+from unittest.mock import Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from core.embedding_manager import EmbeddingManager, EmbeddingError
+
 from config.settings import Config
+from core.embedding_manager import EmbeddingError, EmbeddingManager
 
 
 class TestEmbeddingManager:

@@ -1,9 +1,11 @@
 """Module for centralized logging configuration."""
 
 import logging
-import json
 from pathlib import Path
 from typing import Optional
+
+# Import JSON formatter
+from pythonjsonlogger import jsonlogger
 
 # Create logs directory
 LOG_DIR = Path("logs")
@@ -24,13 +26,8 @@ def setup_logging(
     """
     # Set up formatters
     if use_json_format:
-        formatter = logging.Formatter(
-            json.dumps({
-                "timestamp": "%(asctime)s",
-                "name": "%(name)s",
-                "level": "%(levelname)s",
-                "message": "%(message)s"
-            })
+        formatter = jsonlogger.JsonFormatter(
+            '%(asctime)s %(name)s %(levelname)s %(message)s'
         )
     else:
         formatter = logging.Formatter(

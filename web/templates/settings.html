@@ -383,8 +383,8 @@
                         <input type="hidden" id="index_bm25" name="index_bm25" value="{{ 'True' if config.index_bm25 else 'False' }}">
                         <input type="hidden" id="index_hybrid" name="index_hybrid" value="{{ 'True' if config.index_hybrid else 'False' }}">
                         <!-- Legacy fields kept for compatibility -->
-                        <input type="hidden" id="use_dense" name="use_dense" value="{{ 'True' if config.use_dense_vectors else 'False' }}">
-                        <input type="hidden" id="use_hybrid" name="use_hybrid" value="{{ 'True' if config.use_hybrid else 'False' }}">
+                        <input type="hidden" id="use_dense" name="use_dense" value="{{ 'True' if config.index_dense else 'False' }}">
+                        <input type="hidden" id="use_hybrid" name="use_hybrid" value="{{ 'True' if config.index_hybrid else 'False' }}">
                     </fieldset>
                     
                     <fieldset>
@@ -491,17 +491,6 @@
                     <button type="submit">Сохранить настройки MinerU</button>
                     <div class="progress">
                         <span class="spinner"></span> Сохранение настроек MinerU...
-                    </div>
-                </form>
-            </div>
-            
-            <div class="module-card">
-                <h3>Обработка PDF</h3>
-                <p>Преобразовать PDF из <strong>{{ config.mineru_input_pdf_dir }}</strong> в Markdown и сохранить в <strong>{{ config.mineru_output_md_dir }}</strong>.</p>
-                <form action="/api/admin/process-pdfs" method="post" class="action-form" data-action="process-pdfs">
-                    <button type="submit">Запустить обработку PDF (Subprocess)</button>
-                    <div class="progress">
-                        <span class="spinner"></span> Обработка PDF запущена в фоновом режиме...
                     </div>
                 </form>
             </div>

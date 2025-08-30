@@ -1,16 +1,16 @@
 """Configuration file for pytest tests."""
 
 import sys
-import os
 from pathlib import Path
 
 # Add project root to Python path
 sys.path.append(str(Path(__file__).parent.parent))
 
-import pytest
-from unittest.mock import Mock, MagicMock
 import tempfile
-import json
+from unittest.mock import Mock
+
+import pytest
+
 
 # Fixture for temporary directory
 @pytest.fixture

@@ -1,10 +1,11 @@
 """Integration tests for the search process."""
 
+from unittest.mock import Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock, AsyncMock
-import importlib
-from core.search.searcher import search_in_collection
 from langchain_core.documents import Document
+
+from core.search.searcher import search_in_collection
 
 
 class TestSearchProcess:

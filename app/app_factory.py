@@ -1,15 +1,17 @@
 """Module for creating and configuring the FastAPI application."""
 
-import os
 import logging
+import os
 from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 # Import routes registration
 from app.routes import register_routes
+
 # Import exception handlers
 from core.utils.exception_handlers import add_exception_handlers
 
@@ -28,23 +30,9 @@ def create_app() -> FastAPI:
         description="Поисковая система на основе векторного поиска"
     )
     
-    # Register a middleware to generate request IDs
-    @app.middleware("http")
-    async def add_request_id(request, call_next):
-        import uuid
-        from fastapi import Request
-        
-        # Generate a unique request ID and attach it to the request state
-        request_id = str(uuid.uuid4())
-        request.state.request_id = request_id
-        
-        # Process the request
-        response = await call_next(request)
-        
-        # Add X-Request-ID header to response
-        response.headers["X-Request-ID"] = request_id
-        
-        return response
+    # Use asgi-request-id middleware for generating request IDs
+    from asgi_request_id import RequestIDMiddleware
+    app.add_middleware(RequestIDMiddleware)
     
     # Add centralized exception handlers
     add_exception_handlers(app)
@@ -87,11 +75,17 @@ def create_app() -> FastAPI:
         """Settings route - redirects to admin panel"""
         return RedirectResponse(url="/api/admin/settings/")
     
-    # Add favicon route
+    # Add favicon route that serves the static favicon
+    from fastapi.responses import FileResponse
     @app.get("/favicon.ico")
     async def favicon():
-        """Favicon route - returns empty response"""
-        from fastapi.responses import Response
-        return Response(status_code=204)
+        """Favicon route - serves the static favicon"""
+        favicon_path = Path("web/static/favicon.ico")
+        if favicon_path.exists():
+            return FileResponse(str(favicon_path))
+        else:
+            # Return empty response if favicon not found
+            from fastapi.responses import Response
+            return Response(status_code=204)
     
     return app

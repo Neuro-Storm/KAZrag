@@ -3,18 +3,17 @@
 import asyncio
 import logging
 import sys
-import os
 from pathlib import Path
 
 # Add project root to Python path
 sys.path.append(str(Path(__file__).parent))
 
 # Import required modules
-from config.settings import load_config, Config
-from core.search.searcher import search_in_collection
+from config.logging_config import setup_logging
+from config.settings import Config, load_config
 from core.qdrant.qdrant_client import get_qdrant_client
 from core.qdrant.qdrant_collections import get_cached_collections
-from config.logging_config import setup_logging
+from core.search.searcher import search_in_collection
 
 logger = logging.getLogger(__name__)
 

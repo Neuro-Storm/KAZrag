@@ -1,11 +1,10 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 
 """Скрипт для запуска индексации документов"""
 
-import sys
-import os
 import logging
+import os
+import sys
 from pathlib import Path
 
 # Добавляем корневую директорию проекта в sys.path
@@ -13,7 +12,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config.settings import load_config
 from core.indexing.indexer import run_indexing_from_config
-from core.utils.constants import DEFAULT_COLLECTION_NAME
 
 # Настраиваем логирование
 logging.basicConfig(

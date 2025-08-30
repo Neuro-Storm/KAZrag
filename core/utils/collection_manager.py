@@ -2,13 +2,13 @@
 
 import logging
 import time
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 from qdrant_client import QdrantClient
 from qdrant_client.models import CollectionInfo
 
 from config.config_manager import ConfigManager
 from core.qdrant.qdrant_client import get_qdrant_client
-from config.settings import Config
 
 logger = logging.getLogger(__name__)
 

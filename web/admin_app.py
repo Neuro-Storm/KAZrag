@@ -1,24 +1,25 @@
 """FastAPI приложение для настроек и управления системой."""
 
-import os
 import logging
-import uuid
+import os
 import time
-from typing import Optional
 from pathlib import Path
-from fastapi import APIRouter, Form, Request, Depends, HTTPException, BackgroundTasks
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+
 # Qdrant client provided via dependency injection (core.dependencies.get_client)
-from dotenv import load_dotenv
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.templating import Jinja2Templates
 
 from config.config_manager import ConfigManager
 from config.settings import Config
+from core.converting.file_converter import run_multi_format_processing_from_config
 from core.indexing.indexer import run_indexing_logic
-from core.converting.file_converter import run_pdf_processing_from_config, run_multi_format_processing_from_config
-from core.qdrant.qdrant_collections import get_cached_collections, refresh_collections_cache
-from core.utils.dependencies import get_config, get_client
+from core.qdrant.qdrant_collections import (
+    get_cached_collections,
+    refresh_collections_cache,
+)
+from core.utils.dependencies import get_client, get_config
 from core.utils.exception_handlers import get_request_id
 
 logger = logging.getLogger(__name__)
@@ -232,22 +233,19 @@ def update_index_settings(form_data: dict, config: Config):
         except ValueError:
             raise HTTPException(400, detail="Неверное перекрытие предложений в микро-чанках")
     
-    # use_dense теперь bool
-    # legacy fields and new explicit index flags
-    config.use_dense_vectors = form_data.get("use_dense", False)
-    # New explicit flags for index type
+    # New explicit flags for index type (use_dense_vectors and use_hybrid were removed)
     config.index_dense = bool(form_data.get("index_dense", form_data.get("use_dense", False)))
     config.index_bm25 = bool(form_data.get("index_bm25", False))
     config.index_hybrid = bool(form_data.get("index_hybrid", form_data.get("use_hybrid", False)))
-    # keep legacy flag for backward compatibility
-    config.use_hybrid = form_data.get("use_hybrid", False)
+    # keep legacy flag for backward compatibility (but it's no longer in the model)
+    # config.use_hybrid = form_data.get("use_hybrid", False)  # This field was removed
     
     if form_data.get("device") is not None:
         config.device = form_data["device"]
         if form_data["device"] != config.device:
             device_changed = True
     
-    config.is_indexed = False # Сбрасываем флаг индексации
+    # config.is_indexed = False # Сбрасываем флаг индексации (поле было удалено)
 
     if form_data.get("hf_model") is not None and form_data["hf_model"] not in config.hf_model_history:
         config.hf_model_history.append(form_data["hf_model"])
@@ -304,6 +302,21 @@ def update_mineru_settings(form_data: dict, config: Config):
 
 def update_advanced_settings(form_data: dict, config: Config):
     """Обновляет дополнительные настройки."""
+    # Обновляем модель для плотных векторов, если она передана
+    if "hf_model" in form_data and form_data["hf_model"] is not None:
+        hf_model = form_data["hf_model"].strip()
+        if hf_model:
+            config.current_hf_model = hf_model
+            # Добавляем модель в историю, если её там ещё нет
+            if hf_model not in config.hf_model_history:
+                config.hf_model_history.append(hf_model)
+    
+    # Sparse embedding model
+    if form_data.get("sparse_embedding") is not None:
+        sparse_embedding = form_data["sparse_embedding"].strip()
+        if sparse_embedding:
+            config.sparse_embedding = sparse_embedding
+    
     # Настройки кэширования
     if form_data.get("config_cache_ttl") is not None:
         try:
@@ -599,95 +612,12 @@ async def run_indexing(request: Request, background_tasks: BackgroundTasks, user
             return RedirectResponse(url="/settings?status=indexing_error", status_code=303)
 
 
-# Эндпоинт для обработки PDF через MinerU
-@app.post("/process-pdfs", response_class=RedirectResponse)
-async def process_pdfs_endpoint(request: Request, background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config)):
-    """Запускает процесс обработки PDF файлов."""
-    request_id = get_request_id(request)
-    logger.info(f"[{request_id}] Process PDFs request by user: {username}")
-    
-    # Проверка наличия файлов и их размера
-    try:
-        form = await request.form()
-        files = form.getlist("files")
-        if not files:
-            logger.warning(f"[{request_id}] No files provided for PDF processing")
-            raise HTTPException(status_code=400, detail="Файлы не предоставлены")
-        
-        # Проверка размера файлов (например, ограничение 100MB)
-        MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
-        for file in files:
-            if hasattr(file, 'size') and file.size > MAX_FILE_SIZE:
-                logger.warning(f"[{request_id}] File {file.filename} exceeds size limit")
-                raise HTTPException(status_code=400, detail=f"Файл {file.filename} слишком большой")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"[{request_id}] Error checking files for PDF processing: {str(e)}")
-        raise HTTPException(status_code=400, detail="Ошибка проверки файлов")
-    
-    try:
-        background_tasks.add_task(run_pdf_processing_from_config)
-        logger.info(f"[{request_id}] PDF processing task scheduled successfully")
-        
-        # Проверяем, является ли запрос AJAX запросом
-        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
-        
-        if is_ajax:
-            # Для AJAX запросов возвращаем JSON ответ
-            return JSONResponse(content={"status": "processing_started"})
-        else:
-            # Для обычных запросов возвращаем редирект
-            return RedirectResponse(url="/settings?msg=processing_started", status_code=303)
-            
-    except Exception as e:
-        logger.exception(f"[{request_id}] Error scheduling PDF processing task: {str(e)}")
-        # Проверяем, является ли запрос AJAX запросом
-        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
-        
-        if is_ajax:
-            # Для AJAX запросов возвращаем JSON ответ
-            return JSONResponse(content={"status": "error", "message": "Ошибка запуска обработки PDF"})
-        else:
-            # Для обычных запросов возвращаем редирект с сообщением об ошибке
-            return RedirectResponse(url="/settings?msg=processing_error", status_code=303)
-
-
 # Эндпоинт для обработки файлов различных форматов
 @app.post("/process-files", response_class=RedirectResponse)
 async def process_files_endpoint(request: Request, background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config)):
     """Запускает процесс обработки файлов различных форматов."""
     request_id = get_request_id(request)
     logger.info(f"[{request_id}] Process files request by user: {username}")
-    
-    # Проверка наличия файлов и их размера
-    try:
-        form = await request.form()
-        files = form.getlist("files")
-        if not files:
-            logger.warning(f"[{request_id}] No files provided for multi-format processing")
-            raise HTTPException(status_code=400, detail="Файлы не предоставлены")
-        
-        # Проверка размера файлов (например, ограничение 100MB)
-        MAX_FILE_SIZE = 100 * 1024 * 1024  # 100MB
-        for file in files:
-            if hasattr(file, 'size') and file.size > MAX_FILE_SIZE:
-                logger.warning(f"[{request_id}] File {file.filename} exceeds size limit")
-                raise HTTPException(status_code=400, detail=f"Файл {file.filename} слишком большой")
-                
-        # Проверка типов файлов (например, только PDF, DOCX, TXT)
-        ALLOWED_EXTENSIONS = {'.pdf', '.docx', '.txt', '.md'}
-        for file in files:
-            if hasattr(file, 'filename'):
-                ext = Path(file.filename).suffix.lower()
-                if ext not in ALLOWED_EXTENSIONS:
-                    logger.warning(f"[{request_id}] File {file.filename} has unsupported extension")
-                    raise HTTPException(status_code=400, detail=f"Файл {file.filename} имеет неподдерживаемый формат")
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception(f"[{request_id}] Error checking files for multi-format processing: {str(e)}")
-        raise HTTPException(status_code=400, detail="Ошибка проверки файлов")
     
     try:
         background_tasks.add_task(run_multi_format_processing_from_config)

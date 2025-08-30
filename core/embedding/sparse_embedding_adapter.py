@@ -1,6 +1,7 @@
 """Адаптер для SparseTextEmbedding из fastembed для обеспечения совместимости с langchain-qdrant."""
 
 from typing import List
+
 from fastembed import SparseTextEmbedding
 
 

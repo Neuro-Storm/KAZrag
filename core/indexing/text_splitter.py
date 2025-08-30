@@ -2,9 +2,11 @@
 
 import logging
 from typing import List
+
 from langchain_core.documents import Document
-from core.indexing.chunker import create_text_splitter, get_text_splitter
+
 from config.settings import Config
+from core.indexing.chunker import create_text_splitter
 
 logger = logging.getLogger(__name__)
 

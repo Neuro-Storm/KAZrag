@@ -3,14 +3,16 @@
 import logging
 from pathlib import Path
 from typing import List, Tuple
+
 from config.config_manager import ConfigManager
 
-# Import the PDF converter
-from .pdf_to_md_chunker import process_pdfs_and_chunk
+# Import the new file processor
+from .file_processor import FileProcessor
+
 # Import the new converter manager
 from .manager import ConverterManager
-# Import the new file processor
-from .file_processor import FileProcessor, FileType
+
+# Import the PDF converter
 
 logger = logging.getLogger(__name__)
 

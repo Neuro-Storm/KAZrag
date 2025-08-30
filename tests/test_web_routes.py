@@ -1,12 +1,10 @@
 """Unit tests for the web routes."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-import json
 import os
+from unittest.mock import Mock, patch
 
+import pytest
+from fastapi.testclient import TestClient
 
 # Set ADMIN_API_KEY for testing
 os.environ["ADMIN_API_KEY"] = "test_api_key"
@@ -143,7 +141,7 @@ class TestAdminRoutes:
         }
         
         with patch('web.admin_app.get_cached_collections', return_value=['test-collection']):
-            with patch('web.admin_app.refresh_collections_cache') as mock_refresh:
+            with patch('web.admin_app.refresh_collections_cache'):
                 response = client.post("/api/admin/settings/delete-collection", data=delete_data, auth=("admin", "test_key"))
                 assert response.status_code == 303  # Redirect status
 
@@ -153,7 +151,7 @@ class TestAdminRoutes:
             mock_task_instance = Mock()
             mock_background_tasks.return_value = mock_task_instance
             
-            with patch('web.admin_app.run_indexing_logic') as mock_run_indexing:
+            with patch('web.admin_app.run_indexing_logic'):
                 response = client.post("/api/admin/run-indexing", auth=("admin", "test_key"))
                 assert response.status_code == 303  # Redirect status
 
@@ -163,7 +161,7 @@ class TestAdminRoutes:
             mock_task_instance = Mock()
             mock_background_tasks.return_value = mock_task_instance
             
-            with patch('web.admin_app.run_pdf_processing_from_config') as mock_process_pdfs:
+            with patch('web.admin_app.run_pdf_processing_from_config'):
                 response = client.post("/api/admin/process-pdfs", auth=("admin", "test_key"))
                 assert response.status_code == 303  # Redirect status
 
@@ -173,6 +171,6 @@ class TestAdminRoutes:
             mock_task_instance = Mock()
             mock_background_tasks.return_value = mock_task_instance
             
-            with patch('web.admin_app.run_multi_format_processing_from_config') as mock_process_files:
+            with patch('web.admin_app.run_multi_format_processing_from_config'):
                 response = client.post("/api/admin/process-files", auth=("admin", "test_key"))
                 assert response.status_code == 303  # Redirect status

@@ -1,14 +1,15 @@
 """Integration tests for the indexing process."""
 
+from unittest.mock import patch
+
 import pytest
-import tempfile
-import os
-from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+
 from config.settings import Config
+from core.file_converter import (
+    run_multi_format_processing_from_config,
+    run_pdf_processing_from_config,
+)
 from core.indexer import run_indexing_logic
-from core.file_converter import run_pdf_processing_from_config, run_multi_format_processing_from_config
-from langchain_core.documents import Document
 
 
 class TestIndexingProcess:

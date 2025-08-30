@@ -1,11 +1,11 @@
 """Integration test for different chunking strategies."""
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from core.indexing.chunker import get_text_splitter
-from config.settings import load_config
 
 
 def test_chunking_strategies():

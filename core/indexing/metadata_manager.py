@@ -1,10 +1,10 @@
 """Модуль для управления метаданными для чанков."""
 
-import logging
-from pathlib import Path
-from typing import Dict, Any, Optional, List
-from datetime import datetime
 import hashlib
+import logging
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Optional
 
 try:
     from PIL import Image

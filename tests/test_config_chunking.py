@@ -1,12 +1,14 @@
 """Test configuration with paragraph chunking strategy."""
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from langchain_core.documents import Document
 
 from config.settings import load_config
 from core.indexing.text_splitter import TextSplitter
-from langchain_core.documents import Document
 
 
 def test_config_paragraph_chunking():

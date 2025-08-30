@@ -1,8 +1,10 @@
 """Модуль для многоуровневого чанкинга и векторизации."""
 
 import logging
-from typing import List, Dict, Any, Union
+from typing import Any, Dict, List, Union
+
 from langchain_core.documents import Document
+
 from core.indexing.chunker import get_text_splitter
 from core.indexing.paragraph_chunker import ParagraphTextSplitter
 from core.indexing.sentence_chunker import SentenceTextSplitter

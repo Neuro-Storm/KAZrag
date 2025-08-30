@@ -4,23 +4,16 @@ This module demonstrates how the error handling works in the KAZrag application.
 """
 
 import sys
-import os
 from pathlib import Path
 
 # Add project root to Python path
 sys.path.append(str(Path(__file__).parent.parent))
 
-import uuid
 import logging
-from fastapi import FastAPI, Request, HTTPException
-from core.exception_handlers import (
-    AppException, 
-    ValidationError, 
-    AuthenticationError, 
-    AuthorizationError, 
-    NotFoundError,
-    add_exception_handlers
-)
+
+from fastapi import FastAPI
+
+from core.exception_handlers import add_exception_handlers
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)

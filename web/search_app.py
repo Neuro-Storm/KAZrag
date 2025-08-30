@@ -1,16 +1,17 @@
 """FastAPI приложение для поиска по документам."""
 
 import logging
-import uuid
-from fastapi import APIRouter, Form, Request, Depends
+
+from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-# Qdrant client is provided via dependency injection (get_client)
 
-from core.search.searcher import search_in_collection
-from core.qdrant.qdrant_collections import get_cached_collections
 from config.settings import Config
-from core.utils.dependencies import get_config, get_client
+from core.qdrant.qdrant_collections import get_cached_collections
+
+# Qdrant client is provided via dependency injection (get_client)
+from core.search.searcher import search_in_collection
+from core.utils.dependencies import get_client, get_config
 from core.utils.exception_handlers import get_request_id
 
 logger = logging.getLogger(__name__)

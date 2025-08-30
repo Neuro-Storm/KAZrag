@@ -2,7 +2,8 @@
 
 import logging
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
+
 from langchain_community.document_loaders import TextLoader
 from langchain_core.documents import Document
 

@@ -1,12 +1,12 @@
 """Тесты для админ-панели настроек."""
 
-import pytest
 import os
 
 # Устанавливаем ADMIN_API_KEY для тестов до импорта приложения
 os.environ["ADMIN_API_KEY"] = "test_api_key"
 
 from fastapi.testclient import TestClient
+
 from main import app
 
 client = TestClient(app)
@@ -31,7 +31,7 @@ def test_update_settings_form_validation():
     
     # Тест с пустыми обязательными полями
     try:
-        response = client.post(
+        client.post(
             "/api/admin/update-settings",
             data={
                 "action": "save_index_settings",
@@ -48,7 +48,7 @@ def test_update_settings_form_validation():
     
     # Тест с неверным типом для числовых полей
     try:
-        response = client.post(
+        client.post(
             "/api/admin/update-settings",
             data={
                 "action": "save_index_settings",
@@ -77,7 +77,7 @@ def test_rate_limit():
     
     # Множественные запросы к админ-эндпоинту
     rate_limit_triggered = False
-    for i in range(15):
+    for _i in range(15):
         try:
             response = client.get("/api/admin/settings/", auth=("admin", "test_api_key"))
             if response.status_code == 429:

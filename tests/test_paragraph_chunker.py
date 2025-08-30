@@ -1,6 +1,7 @@
 """Тесты для проверки различных стратегий чанкинга."""
 
 import unittest
+
 from core.indexing.paragraph_chunker import ParagraphTextSplitter
 
 

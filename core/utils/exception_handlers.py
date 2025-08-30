@@ -1,15 +1,13 @@
 """Module for centralized exception handling in the FastAPI application."""
 
 import logging
-import uuid
-import traceback
 import os
-from typing import Union
-from fastapi import Request, FastAPI
-from fastapi.responses import JSONResponse, HTMLResponse
+import uuid
+
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from jinja2 import TemplateNotFound
 
 logger = logging.getLogger(__name__)
 
@@ -261,7 +259,7 @@ def add_exception_handlers(app: FastAPI) -> None:
 
 
 def get_request_id(request: Request) -> str:
-    """Get or generate a request ID for logging context.
+    """Get request ID from asgi-request-id middleware or generate new one.
     
     Args:
         request (Request): The FastAPI request object
@@ -269,6 +267,18 @@ def get_request_id(request: Request) -> str:
     Returns:
         str: Request ID
     """
+    # Try to get request ID from asgi-request-id middleware first
+    try:
+        from asgi_request_id.context import request_id_ctx_var
+        request_id = request_id_ctx_var.get()
+        if request_id:
+            return request_id
+    except ImportError:
+        pass
+    except Exception:
+        pass
+    
+    # Fallback to old implementation if asgi-request-id is not available
     if not hasattr(request.state, "request_id"):
         request.state.request_id = str(uuid.uuid4())
     return request.state.request_id

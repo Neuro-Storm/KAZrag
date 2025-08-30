@@ -1,11 +1,12 @@
 """Unit tests for the search components."""
 
+from unittest.mock import Mock, patch
+
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-from core.search.collection_analyzer import CollectionAnalyzer, SearchError
-from core.search.search_strategy import SearchStrategy
+
+from core.search.collection_analyzer import CollectionAnalyzer
 from core.search.search_executor import SearchExecutor
-from langchain_qdrant import QdrantVectorStore
+from core.search.search_strategy import SearchStrategy
 
 
 class TestCollectionAnalyzer:

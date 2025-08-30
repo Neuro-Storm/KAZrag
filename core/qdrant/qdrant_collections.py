@@ -2,9 +2,10 @@
 
 import logging
 from typing import List
-from core.utils.collection_manager import CollectionManager
-from core.qdrant.qdrant_client import get_qdrant_client
+
 from config.config_manager import ConfigManager
+from core.qdrant.qdrant_client import get_qdrant_client
+from core.utils.collection_manager import CollectionManager
 
 logger = logging.getLogger(__name__)
 

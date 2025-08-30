@@ -1,7 +1,7 @@
 """Модуль для управления векторизаторами (эмбеддерами)."""
 
-import torch
 import logging
+
 from config.settings import Config
 from core.embedding.embedding_manager import EmbeddingManager
 

@@ -1,10 +1,9 @@
 """Модуль для работы с конфигурацией приложения."""
 
-import json
 import logging
-import time
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -62,18 +61,16 @@ class Config(BaseModel):
     multilevel_micro_sentences_per_chunk: int = 5
     multilevel_micro_sentence_overlap: int = 1
     device: str = "auto"
-    use_dense_vectors: bool = True
     # Новые отдельные режимы индексации
     index_dense: bool = True
     index_bm25: bool = False
     index_hybrid: bool = False
-    is_indexed: bool = False
     embedding_batch_size: int = Field(default=32, ge=1)  # Минимум 1
     indexing_batch_size: int = Field(default=50, ge=1)   # Минимум 1
     force_recreate: bool = True
     memory_threshold: int = DEFAULT_MEMORY_THRESHOLD  # 500MB по умолчанию
     sparse_embedding: Optional[str] = "Qdrant/bm25"
-    use_hybrid: bool = False
+    is_indexed: bool = False  # Флаг, указывающий, была ли выполнена индексация
     
     # Настройки Qdrant
     qdrant_url: str = DEFAULT_QDRANT_URL
@@ -122,7 +119,6 @@ def load_config() -> Config:
     
     Если файл не существует, создает его с настройками по умолчанию.
     """
-    from pydantic import ValidationError
     from config.config_manager import ConfigManager
     
     config_manager = ConfigManager.get_instance()

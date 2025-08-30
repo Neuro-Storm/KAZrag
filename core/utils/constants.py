@@ -1,7 +1,8 @@
 """Модуль с константами проекта."""
 
-from jinja2 import Environment, FileSystemLoader
 from pathlib import Path
+
+from jinja2 import Environment, FileSystemLoader
 
 # Порог памяти для определения размера батча (500MB по умолчанию)
 MEMORY_THRESHOLD = 500 * 1024 * 1024

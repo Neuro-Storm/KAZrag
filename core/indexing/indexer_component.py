@@ -2,18 +2,17 @@
 
 import logging
 from pathlib import Path
-from typing import List, Tuple, Optional
-import psutil
+from typing import List, Optional, Tuple
 
-from langchain_qdrant import QdrantVectorStore, RetrievalMode
+import psutil
 from langchain_core.documents import Document
+from langchain_qdrant import QdrantVectorStore, RetrievalMode
 from qdrant_client import QdrantClient
 
-from core.qdrant.qdrant_client import get_qdrant_client, aget_qdrant_client
 from config.settings import Config
 from core.embedding.embeddings import get_dense_embedder, get_device
 from core.embedding.sparse_embedding_adapter import SparseEmbeddingAdapter
-from core.indexing.metadata_manager import metadata_manager
+from core.qdrant.qdrant_client import aget_qdrant_client
 
 logger = logging.getLogger(__name__)
 

@@ -9,14 +9,14 @@ from typing import Optional
 
 from qdrant_client import QdrantClient
 
-from config.settings import Config
 from config.config_manager import ConfigManager
+from config.settings import Config
 
 # Get singleton instance of ConfigManager
 config_manager = ConfigManager.get_instance()
 
 
-@lru_cache()
+@lru_cache
 def _create_client(
     url: str, 
     timeout: Optional[int] = None,
@@ -33,7 +33,7 @@ def _create_client(
         QdrantClient: Configured Qdrant client
     """
     # Get default config for fallback values
-    config = config_manager.get()
+    config_manager.get()
     
     # Use provided timeout or default from config
     client_timeout = timeout if timeout is not None else 10

@@ -1,13 +1,14 @@
 """Module for centralized configuration management."""
 
+import functools
 import json
-import time
 import logging
-from pathlib import Path
-from typing import Optional, Any
-from pydantic import BaseModel, ValidationError
+import time
+from typing import Any, Optional
 
-from config.settings import Config, CONFIG_FILE, DEFAULT_CACHE_TTL
+from pydantic import ValidationError
+
+from config.settings import CONFIG_FILE, DEFAULT_CACHE_TTL, Config
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +25,8 @@ class ConfigManager:
             cache_ttl: Time to live for cached configuration in seconds
         """
         self.cache_ttl = cache_ttl
-        self._cached_config: Optional[Config] = None
-        self._cached_config_time: float = 0
+        # Use functools.lru_cache for configuration caching
+        self._get_config_cached = functools.lru_cache(maxsize=1)(self._load_config_from_file)
         
     @classmethod
     def get_instance(cls, cache_ttl: int = DEFAULT_CACHE_TTL) -> 'ConfigManager':
@@ -41,6 +42,41 @@ class ConfigManager:
             cls._instance = cls(cache_ttl)
         return cls._instance
     
+    def _load_config_from_file(self) -> Config:
+        """Load configuration from file without caching.
+        
+        Returns:
+            Config: Loaded configuration object
+        """
+        logger.debug("Loading configuration from file")
+        if not CONFIG_FILE.exists():
+            # Create default config if file doesn't exist
+            config = Config()
+            self.save(config)
+            return config
+            
+        try:
+            with open(CONFIG_FILE, encoding="utf-8") as f:
+                config_dict = json.load(f)
+                
+            # Create Config object with validation
+            config = Config(**config_dict)
+            return config
+            
+        except ValidationError as e:
+            logger.exception(f"Configuration validation errors: {e.errors()}")
+            # Return default config if validation fails
+            config = Config()
+            self.save(config)
+            return config
+            
+        except Exception as e:
+            logger.exception(f"Error loading configuration: {e}")
+            # Return default config if any other error occurs
+            config = Config()
+            self.save(config)
+            return config
+    
     def load(self) -> Config:
         """Load configuration from file with caching.
         
@@ -50,51 +86,19 @@ class ConfigManager:
         current_time = time.time()
         
         # Check if we have a valid cached config
-        if (self._cached_config is not None and 
-            current_time - self._cached_config_time <= self.cache_ttl):
+        # We'll use a simple time-based check to invalidate the cache
+        if hasattr(self, '_last_load_time') and current_time - self._last_load_time <= self.cache_ttl:
             logger.debug("Returning cached configuration")
             return self._cached_config
-            
-        # Load config from file
-        logger.debug("Loading configuration from file")
-        if not CONFIG_FILE.exists():
-            # Create default config if file doesn't exist
-            config = Config()
-            self.save(config)
-            self._cached_config = config
-            self._cached_config_time = current_time
-            return self._cached_config
-            
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                config_dict = json.load(f)
-                
-            # Create Config object with validation
-            config = Config(**config_dict)
-            
-            # Update cache
-            self._cached_config = config
-            self._cached_config_time = current_time
-            
-            return config
-            
-        except ValidationError as e:
-            logger.exception(f"Configuration validation errors: {e.errors()}")
-            # Return default config if validation fails
-            config = Config()
-            self.save(config)
-            self._cached_config = config
-            self._cached_config_time = current_time
-            return self._cached_config
-            
-        except Exception as e:
-            logger.exception(f"Error loading configuration: {e}")
-            # Return default config if any other error occurs
-            config = Config()
-            self.save(config)
-            self._cached_config = config
-            self._cached_config_time = current_time
-            return self._cached_config
+        
+        # Load fresh config
+        config = self._get_config_cached()
+        
+        # Update cache
+        self._cached_config = config
+        self._last_load_time = current_time
+        
+        return config
     
     def save(self, config: Config) -> None:
         """Save configuration to file.
@@ -112,7 +116,11 @@ class ConfigManager:
                 
             # Update cache
             self._cached_config = config
-            self._cached_config_time = time.time()
+            if hasattr(self, '_last_load_time'):
+                self._last_load_time = time.time()
+            
+            # Clear the lru_cache
+            self._get_config_cached.cache_clear()
             
             logger.info("Configuration saved successfully")
             
@@ -134,9 +142,14 @@ class ConfigManager:
         Returns:
             Config: Reloaded configuration object
         """
-        # Clear cache
-        self._cached_config = None
-        self._cached_config_time = 0
+        # Clear the lru_cache
+        self._get_config_cached.cache_clear()
+        
+        # Clear our own cache
+        if hasattr(self, '_last_load_time'):
+            delattr(self, '_last_load_time')
+        if hasattr(self, '_cached_config'):
+            delattr(self, '_cached_config')
         
         # Load fresh config
         return self.load()

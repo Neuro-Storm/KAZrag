@@ -1,16 +1,17 @@
 """Основной модуль для запуска приложения KAZrag."""
 
-import uvicorn
 import logging
-import sys
 import os
+import sys
 from pathlib import Path
+
+import uvicorn
 from dotenv import load_dotenv
 
 # Импорт модулей для настройки приложения
 from app.app_factory import create_app
-from config.logging_config import setup_logging
 from app.startup import startup_event_handler
+from config.logging_config import setup_logging
 
 # Настройка логирования через централизованный модуль
 setup_logging()

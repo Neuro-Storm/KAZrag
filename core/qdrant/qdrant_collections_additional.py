@@ -2,6 +2,7 @@
 
 import logging
 from typing import Tuple
+
 from config.settings import load_config
 from core.qdrant_client import get_qdrant_client
 

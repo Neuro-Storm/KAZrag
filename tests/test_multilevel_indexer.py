@@ -2,9 +2,11 @@
 
 import unittest
 from unittest.mock import Mock, patch
+
 from langchain_core.documents import Document
-from core.indexing.multilevel_indexer import MultiLevelIndexer
+
 from config.settings import Config
+from core.indexing.multilevel_indexer import MultiLevelIndexer
 
 
 class TestMultiLevelIndexer(unittest.TestCase):

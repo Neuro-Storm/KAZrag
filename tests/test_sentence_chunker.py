@@ -1,6 +1,7 @@
 """Тесты для проверки чанкинга по предложениям."""
 
 import unittest
+
 from core.indexing.sentence_chunker import SentenceTextSplitter
 
 

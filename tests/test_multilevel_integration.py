@@ -1,16 +1,18 @@
 # Comprehensive multilevel chunking integration test
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from langchain_core.documents import Document
-from core.indexing.multilevel_chunker import (
-    MultiLevelChunker, 
-    create_flexible_multilevel_chunker,
-    create_multilevel_chunker_from_config
-)
+
 from config.settings import load_config
+from core.indexing.multilevel_chunker import (
+    MultiLevelChunker,
+    create_flexible_multilevel_chunker,
+    create_multilevel_chunker_from_config,
+)
 
 
 def test_comprehensive_multilevel_chunking():
@@ -18,7 +20,7 @@ def test_comprehensive_multilevel_chunking():
     print()
     
     # Load configuration
-    config = load_config()
+    load_config()
     print("1. Configuration loaded successfully")
     
     # Create test document
@@ -135,10 +137,10 @@ This is the final paragraph in our sample text, demonstrating the complete workf
     # Test 6: Vector generation
     print("\n8. Testing vector generation:")
     vectors = char_char_chunker.get_all_vectors_for_chunk(sample_text[:500])
-    print("   Generated {} text representations for vectorization".format(len(vectors)))
-    print("   Main chunk (first 100 chars): {}...".format(vectors[0][:100]))
+    print(f"   Generated {len(vectors)} text representations for vectorization")
+    print(f"   Main chunk (first 100 chars): {vectors[0][:100]}...")
     if len(vectors) > 1:
-        print("   First micro-chunk (first 50 chars): {}...".format(vectors[1][:50]))
+        print(f"   First micro-chunk (first 50 chars): {vectors[1][:50]}...")
     
     print("\n=== All comprehensive tests passed successfully! ===")
     print()

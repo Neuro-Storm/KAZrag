@@ -1,14 +1,16 @@
 """Integration test for all chunking strategies."""
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
+from langchain_core.documents import Document
 
 from config.settings import load_config
 from core.indexing.chunker import get_text_splitter
 from core.indexing.paragraph_chunker import ParagraphTextSplitter
 from core.indexing.sentence_chunker import SentenceTextSplitter
-from langchain_core.documents import Document
 
 
 def test_all_chunking_strategies():

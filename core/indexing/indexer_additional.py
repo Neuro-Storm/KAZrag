@@ -2,6 +2,7 @@
 
 import logging
 from typing import Tuple
+
 from core.indexer import run_indexing_logic
 
 logger = logging.getLogger(__name__)

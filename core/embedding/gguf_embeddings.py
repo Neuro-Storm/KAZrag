@@ -1,10 +1,12 @@
 """Модуль для работы с GGUF эмбеддерами."""
 
 import logging
-from typing import List
-from langchain_core.embeddings import Embeddings
-from config.settings import load_config, Config
 import os
+from typing import List
+
+from langchain_core.embeddings import Embeddings
+
+from config.settings import Config, load_config
 
 logger = logging.getLogger(__name__)
 

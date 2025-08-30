@@ -2,6 +2,7 @@
 
 import logging
 from typing import Tuple
+
 from qdrant_client import QdrantClient
 
 logger = logging.getLogger(__name__)

@@ -1,11 +1,12 @@
 """Module for centralized embedding management."""
 
 import logging
-import torch
 from collections import OrderedDict
-from typing import Optional, Dict, Tuple, Any, List
-from langchain_huggingface import HuggingFaceEmbeddings
+from typing import Any, Dict, List, Optional
+
+import torch
 from langchain_core.embeddings import Embeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 
 from config.config_manager import ConfigManager
 from config.settings import Config

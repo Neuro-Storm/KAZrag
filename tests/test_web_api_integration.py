@@ -1,13 +1,13 @@
 """Integration tests for the web API."""
 
+from unittest.mock import Mock, patch
+
 import pytest
 from fastapi.testclient import TestClient
-from unittest.mock import Mock, patch, MagicMock
-import json
+from langchain_core.documents import Document
+
 from app.app_factory import create_app
 from config.settings import Config
-from core.searcher import search_in_collection
-from langchain_core.documents import Document
 
 
 class TestWebAPIIntegration:
@@ -230,7 +230,7 @@ class TestWebAPIIntegration:
         
         with patch('web.admin_app.verify_admin_access_from_form', return_value="admin"):
             with patch('web.admin_app.get_cached_collections', return_value=['test-collection']):
-                with patch('web.admin_app.refresh_collections_cache') as mock_refresh:
+                with patch('web.admin_app.refresh_collections_cache'):
                     # Make the request
                     response = client.post(
                         "/api/admin/settings/delete-collection",
@@ -250,7 +250,7 @@ class TestWebAPIIntegration:
                 mock_task_instance = Mock()
                 mock_background_tasks.return_value = mock_task_instance
                 
-                with patch('web.admin_app.run_indexing_logic') as mock_run_indexing:
+                with patch('web.admin_app.run_indexing_logic'):
                     # Make the request
                     response = client.post(
                         "/api/admin/run-indexing",
@@ -269,7 +269,7 @@ class TestWebAPIIntegration:
                 mock_task_instance = Mock()
                 mock_background_tasks.return_value = mock_task_instance
                 
-                with patch('web.admin_app.run_pdf_processing_from_config') as mock_process_pdfs:
+                with patch('web.admin_app.run_pdf_processing_from_config'):
                     # Make the request
                     response = client.post(
                         "/api/admin/process-pdfs",
@@ -288,7 +288,7 @@ class TestWebAPIIntegration:
                 mock_task_instance = Mock()
                 mock_background_tasks.return_value = mock_task_instance
                 
-                with patch('web.admin_app.run_multi_format_processing_from_config') as mock_process_files:
+                with patch('web.admin_app.run_multi_format_processing_from_config'):
                     # Make the request
                     response = client.post(
                         "/api/admin/process-files",

@@ -1,7 +1,8 @@
 # Test web form submission for chunking settings.
 
-import sys
 import os
+import sys
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 from config.settings import load_config
@@ -14,11 +15,11 @@ def test_form_submission():
     config = load_config()
     
     print("=== Initial Configuration ===")
-    print("Chunking strategy: {}".format(config.chunking_strategy))
-    print("Paragraphs per chunk: {}".format(config.paragraphs_per_chunk))
-    print("Paragraph overlap: {}".format(config.paragraph_overlap))
-    print("Sentences per chunk: {}".format(config.sentences_per_chunk))
-    print("Sentence overlap: {}".format(config.sentence_overlap))
+    print(f"Chunking strategy: {config.chunking_strategy}")
+    print(f"Paragraphs per chunk: {config.paragraphs_per_chunk}")
+    print(f"Paragraph overlap: {config.paragraph_overlap}")
+    print(f"Sentences per chunk: {config.sentences_per_chunk}")
+    print(f"Sentence overlap: {config.sentence_overlap}")
     
     # Simulate form data with all required fields
     form_data = {
@@ -40,22 +41,22 @@ def test_form_submission():
     
     print("\n=== Form Data ===")
     for key, value in form_data.items():
-        print("{}: {}".format(key, value))
+        print(f"{key}: {value}")
     
     # Update settings
     try:
         update_index_settings(form_data, config)
         print("\n=== Updated Configuration ===")
-        print("Chunking strategy: {}".format(config.chunking_strategy))
-        print("Chunk size: {}".format(config.chunk_size))
-        print("Chunk overlap: {}".format(config.chunk_overlap))
-        print("Paragraphs per chunk: {}".format(config.paragraphs_per_chunk))
-        print("Paragraph overlap: {}".format(config.paragraph_overlap))
-        print("Sentences per chunk: {}".format(config.sentences_per_chunk))
-        print("Sentence overlap: {}".format(config.sentence_overlap))
+        print(f"Chunking strategy: {config.chunking_strategy}")
+        print(f"Chunk size: {config.chunk_size}")
+        print(f"Chunk overlap: {config.chunk_overlap}")
+        print(f"Paragraphs per chunk: {config.paragraphs_per_chunk}")
+        print(f"Paragraph overlap: {config.paragraph_overlap}")
+        print(f"Sentences per chunk: {config.sentences_per_chunk}")
+        print(f"Sentence overlap: {config.sentence_overlap}")
         print("\nTest passed!")
     except Exception as e:
-        print("\nTest failed with error: {}".format(e))
+        print(f"\nTest failed with error: {e}")
 
 
 if __name__ == "__main__":

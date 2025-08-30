@@ -1,9 +1,10 @@
 """Модуль для определения стратегии поиска."""
 
 import logging
-from typing import Optional, Any
+
 from langchain_qdrant import QdrantVectorStore, RetrievalMode
-from core.search.collection_analyzer import CollectionAnalyzer, SearchError
+
+from core.search.collection_analyzer import CollectionAnalyzer
 
 logger = logging.getLogger(__name__)
 

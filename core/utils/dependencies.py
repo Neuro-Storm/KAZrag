@@ -2,12 +2,14 @@
 
 import logging
 import time
+
 from fastapi import Depends
+from tenacity import retry, stop_after_attempt, wait_fixed
+
 from config.config_manager import ConfigManager
 from config.settings import Config
-from tenacity import retry, stop_after_attempt, wait_fixed
-from core.utils.constants import RETRY_ATTEMPTS, RETRY_WAIT_TIME
 from core.qdrant.qdrant_client import get_qdrant_client
+from core.utils.constants import RETRY_ATTEMPTS, RETRY_WAIT_TIME
 
 logger = logging.getLogger(__name__)
 

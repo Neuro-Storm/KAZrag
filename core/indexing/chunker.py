@@ -2,12 +2,13 @@
 
 import logging
 from functools import lru_cache
-from typing import Union
+
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_text_splitters.base import TextSplitter
+
+from config.settings import Config, load_config
 from core.indexing.paragraph_chunker import ParagraphTextSplitter
 from core.indexing.sentence_chunker import SentenceTextSplitter
-from config.settings import load_config, Config
 
 logger = logging.getLogger(__name__)
 

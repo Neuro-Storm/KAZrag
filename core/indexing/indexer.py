@@ -1,19 +1,19 @@
 """Модуль для управления индексацией документов в Qdrant."""
 
+import asyncio
 import logging
 from pathlib import Path
-from typing import Tuple, List
-import asyncio
+from typing import List, Tuple
 
 from langchain_core.documents import Document
 
 from config.config_manager import ConfigManager
 from config.settings import Config
-from core.indexing.metadata_manager import metadata_manager
 from core.indexing.document_loader import DocumentLoader, IndexingError
-from core.indexing.text_splitter import TextSplitter
 from core.indexing.indexer_component import Indexer
+from core.indexing.metadata_manager import metadata_manager
 from core.indexing.multilevel_indexer import MultiLevelIndexer
+from core.indexing.text_splitter import TextSplitter
 
 logger = logging.getLogger(__name__)
 

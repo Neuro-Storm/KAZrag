@@ -1,22 +1,27 @@
 """Модуль для многоуровневой индексации документов в Qdrant."""
 
 import logging
-from typing import List, Dict, Any, Optional
-from pathlib import Path
 import uuid  # Добавляем импорт uuid
+from typing import Any, Dict, List
 
 from langchain_core.documents import Document
-from qdrant_client import QdrantClient
-from qdrant_client.models import VectorParams, Distance, PointStruct, MultiVectorConfig, MultiVectorComparator
 from qdrant_client.http.models import SparseVectorParams
+from qdrant_client.models import (
+    Distance,
+    MultiVectorComparator,
+    MultiVectorConfig,
+    PointStruct,
+    VectorParams,
+)
 
 from config.settings import Config
-from core.utils.constants import DEFAULT_COLLECTION_NAME
-from core.indexing.multilevel_chunker import MultiLevelChunker, create_multilevel_chunker_from_config
 from core.embedding.embedding_manager import EmbeddingManager
 from core.embedding.sparse_embedding_adapter import SparseEmbeddingAdapter
-
+from core.indexing.multilevel_chunker import (
+    MultiLevelChunker,
+)
 from core.qdrant.qdrant_client import get_qdrant_client
+from core.utils.constants import DEFAULT_COLLECTION_NAME
 
 # Импортируем SparseEmbeddingAdapter
 try:
@@ -70,7 +75,7 @@ class MultiLevelIndexer:
         
         # Проверяем существование коллекции
         try:
-            collection_info = self.client.get_collection(collection_name)
+            self.client.get_collection(collection_name)
             logger.info(f"Коллекция {collection_name} уже существует")
             # TODO: Проверить, соответствует ли конфигурация коллекции нашим требованиям
         except Exception:
@@ -205,7 +210,6 @@ class MultiLevelIndexer:
             logger.info(f"Макро-чанк {i+1}: {len(micro_chunks)} микро-чанков")
             
             # Создаем точку для Qdrant без явного указания ID (Qdrant сгенерирует UUID автоматически)
-            from qdrant_client.models import PointStruct
             
             # Получаем все dense векторы для макро-чанка (макро + микро)
             all_texts = [macro_chunk.page_content] + micro_chunks

@@ -1,13 +1,16 @@
 """Unit tests for the indexer components."""
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
-from core.document_loader import DocumentLoader, IndexingError
-from core.text_splitter import TextSplitter
-from core.indexer_component import Indexer, IndexingError as IndexerError
+from unittest.mock import Mock, patch
+
+import pytest
 from langchain_core.documents import Document
+
 from config.settings import Config
+from core.document_loader import DocumentLoader
+from core.indexer_component import Indexer
+from core.indexer_component import IndexingError as IndexerError
+from core.text_splitter import TextSplitter
 
 
 class TestDocumentLoader:

@@ -1,7 +1,7 @@
 """Module for application startup and shutdown event handlers."""
 
 import logging
-import sys
+
 from config.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ def startup_event_handler() -> None:
     try:
         logger.info("Loading configuration")
         config_manager = ConfigManager.get_instance()
-        config = config_manager.get()
+        config_manager.get()
         logger.info("Configuration successfully loaded")
     except Exception as e:
         logger.exception(f"Error loading configuration: {e}")

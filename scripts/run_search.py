@@ -1,13 +1,12 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 
 """
 Скрипт для выполнения поиска в коллекции Qdrant
 """
 
-import sys
-import os
 import logging
+import os
+import sys
 
 # Добавляем корневую директорию проекта в sys.path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -30,7 +29,7 @@ async def run_search():
         logger.info("Начало процесса поиска")
         
         # Загружаем конфигурацию
-        config = load_config()
+        load_config()
         logger.info("Конфигурация загружена успешно")
         
         # Устанавливаем параметры поиска

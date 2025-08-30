@@ -1,8 +1,9 @@
 """Module for registering application routes."""
 
 from fastapi import FastAPI
-from web.search_app import app as search_router
+
 from web.admin_app import app as admin_router
+from web.search_app import app as search_router
 
 
 def register_routes(app: FastAPI) -> None:

@@ -1,8 +1,13 @@
 """Тесты для многоуровневого чанкинга."""
 
 import unittest
+
 from langchain_core.documents import Document
-from core.indexing.multilevel_chunker import MultiLevelChunker, create_flexible_multilevel_chunker
+
+from core.indexing.multilevel_chunker import (
+    MultiLevelChunker,
+    create_flexible_multilevel_chunker,
+)
 
 
 class TestMultiLevelChunker(unittest.TestCase):

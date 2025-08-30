@@ -1,4 +1,3 @@
-
 """
 Модуль для преобразования PDF в Markdown с помощью утилиты MinerU.
 
@@ -7,7 +6,6 @@
 - Сохраняет изображения в отдельную папку
 - Поддерживает различные настройки парсинга (формулы, таблицы)
 - Обрабатывает файлы через subprocess вызов mineru
-- Извлекает метаданные из PDF файлов
 
 Структура выходных данных:
 output_md_dir/
@@ -16,18 +14,12 @@ output_md_dir/
   │   └── images/           # Папка с извлеченными изображениями
 """
 
-import os
-import subprocess
-import shutil
 import logging
+import os
+import shutil
+import subprocess
 from pathlib import Path
-from typing import Optional, Dict, Any
-
-try:
-    from PyPDF2 import PdfReader
-    HAS_PYPDF2 = True
-except ImportError:
-    HAS_PYPDF2 = False
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -97,8 +89,7 @@ def run_subprocess(pdf_file: Path, temp_output_dir: Path, backend: str, method: 
     return subprocess.run(
         cmd,
         env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
         text=True,
         timeout=600  # Фиксированный таймаут 10 минут
     )
@@ -117,6 +108,14 @@ def postprocess_output(pdf_file: Path, pdf_stem: str, temp_output_dir: Path, fin
     Returns:
         bool: Успешность пост-обработки.
     """
+    # Логируем содержимое временной директории для диагностики
+    logger.debug(f"Содержимое temp_output_dir ({temp_output_dir}):")
+    if temp_output_dir.exists():
+        for item in temp_output_dir.rglob("*"):
+            logger.debug(f"  - {item.relative_to(temp_output_dir)} ({'DIR' if item.is_dir() else 'FILE'})")
+    else:
+        logger.debug(f"  -> temp_output_dir не существует.")
+
     # Пост-обработка: перенос результатов из временной папки в финальную
     # MinerU создает вложенные директории вида temp_output_dir/{pdf_stem}/auto/
     mineru_output_dir = temp_output_dir / pdf_stem / "auto"
@@ -164,49 +163,6 @@ def postprocess_output(pdf_file: Path, pdf_stem: str, temp_output_dir: Path, fin
         
     return True
 
-def extract_pdf_metadata(pdf_file: Path) -> Dict[str, Any]:
-    """
-    Извлекает метаданные из PDF файла.
-    
-    Args:
-        pdf_file (Path): Путь к PDF файлу.
-        
-    Returns:
-        Dict[str, Any]: Словарь с метаданными PDF.
-    """
-    if not HAS_PYPDF2:
-        logger.warning("PyPDF2 is not available for metadata extraction")
-        return {}
-        
-    if not pdf_file.exists():
-        logger.warning(f"File not found for metadata extraction: {pdf_file}")
-        return {}
-        
-    try:
-        metadata = {}
-        with open(pdf_file, 'rb') as f:
-            pdf = PdfReader(f)
-            if pdf.metadata:
-                # Извлекаем стандартные метаданные
-                pdf_metadata = {
-                    "title": pdf.metadata.get("/Title"),
-                    "author": pdf.metadata.get("/Author"),
-                    "subject": pdf.metadata.get("/Subject"),
-                    "creator": pdf.metadata.get("/Creator"),
-                    "producer": pdf.metadata.get("/Producer"),
-                    "creation_date": pdf.metadata.get("/CreationDate"),
-                    "modification_date": pdf.metadata.get("/ModDate"),
-                }
-                # Фильтруем None значения
-                metadata.update({k: v for k, v in pdf_metadata.items() if v is not None})
-                
-                # Добавляем количество страниц
-                metadata["page_count"] = len(pdf.pages)
-                
-        return metadata
-    except Exception as e:
-        logger.warning(f"Error extracting metadata from PDF file {pdf_file.name}: {e}")
-        return {}
 
 def process_pdfs_and_chunk(
     input_pdf_dir: str,
@@ -220,7 +176,7 @@ def process_pdfs_and_chunk(
     lang: str = "east_slavic", # Изменено значение по умолчанию
     sglang_url: Optional[str] = None,
     device: str = "cpu"
-):
+) -> bool:
     """
     Основная функция обработки PDF файлов.
     
@@ -229,7 +185,6 @@ def process_pdfs_and_chunk(
     2. Вызывает mineru для конвертации в markdown
     3. Переносит результаты в финальную папку
     4. Очищает временные файлы
-    5. Извлекает метаданные из PDF файлов
 
     Args:
         input_pdf_dir (str): Путь к директории с PDF файлами.
@@ -244,6 +199,9 @@ def process_pdfs_and_chunk(
         sglang_url (Optional[str]): URL сервера sglang (только для backend='vlm-sglang-client').
         device (str): Устройство для обработки: 'cpu' или 'cuda'.
 
+    Returns:
+        bool: True если все файлы были успешно обработаны, False если хотя бы один файл не был обработан.
+        
     Raises:
         FileNotFoundError: Если входная директория не существует.
     """
@@ -257,13 +215,16 @@ def process_pdfs_and_chunk(
     pdf_files = list(input_path.glob("*.pdf"))
     if not pdf_files:
         logger.info(f"В директории {input_pdf_dir} не найдено PDF файлов.")
-        return
+        return True # Нет файлов для обработки - считаем успешным
 
     logger.info(f"Найдено {len(pdf_files)} PDF файлов для обработки.")
     logger.info("Используется метод обработки: Subprocess (вызов команды)")
 
     # Настройка переменных окружения для MinerU
     env = setup_env(model_source, models_dir, enable_formula_parsing, enable_table_parsing)
+    
+    # Флаг для отслеживания успешности обработки всех файлов
+    all_successful = True
 
     for pdf_file in pdf_files:
         temp_output_dir = None
@@ -296,36 +257,32 @@ def process_pdfs_and_chunk(
                     logger.error(f"Stdout: {result.stdout}")
                 if result.stderr:
                     logger.error(f"Stderr: {result.stderr}") 
+                all_successful = False
                 continue
 
             # Пост-обработка вывода
             if not postprocess_output(pdf_file, pdf_stem, temp_output_dir, final_output_dir, output_root_path):
+                all_successful = False
                 continue
-
-            # Извлечение метаданных из PDF файла
-            metadata = extract_pdf_metadata(pdf_file)
-            if metadata:
-                # Сохраняем метаданные в отдельный файл
-                metadata_file = final_output_dir / f"{pdf_stem}_metadata.json"
-                import json
-                with open(metadata_file, 'w', encoding='utf-8') as f:
-                    json.dump(metadata, f, ensure_ascii=False, indent=2)
-                logger.info(f"  -> Метаданные сохранены в: {metadata_file.relative_to(output_root_path)}")
 
         except subprocess.TimeoutExpired:
             logger.exception(f"Ошибка: Таймаут при обработке файла {pdf_file.name}.")
+            all_successful = False
             continue
         except FileNotFoundError as e:
             if "mineru" in str(e).lower() or "[winerror 2]" in str(e).lower() or "No such file or directory" in str(e):
                  logger.exception(f"Команда 'mineru' не найдена. Убедитесь, что пакет 'mineru' установлен: {e}")
             else:
                  logger.exception(f"Ошибка FileNotFoundError при обработке файла {pdf_file.name}: {e}")
+            all_successful = False
             continue
         except subprocess.CalledProcessError as e:
             logger.exception(f"Ошибка при вызове MinerU для файла {pdf_file.name}: {e}")
+            all_successful = False
             continue
         except Exception as e:
             logger.exception(f"Неожиданная ошибка при обработке файла {pdf_file.name}: {e}")
+            all_successful = False
             continue
         finally:
             # Удаляем временную директорию в любом случае
@@ -333,4 +290,4 @@ def process_pdfs_and_chunk(
                 shutil.rmtree(temp_output_dir)
 
     logger.info("Обработка PDF файлов завершена.")
-
+    return all_successful

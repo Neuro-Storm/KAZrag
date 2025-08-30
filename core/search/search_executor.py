@@ -1,9 +1,10 @@
 """Модуль для выполнения поиска."""
 
 import logging
-from typing import List, Tuple, Any, Optional, Dict
-from qdrant_client.http.models import Filter, FieldCondition, MatchValue, Range
+from typing import Any, Dict, List, Optional, Tuple
+
 from langchain_qdrant import QdrantVectorStore
+from qdrant_client.http.models import FieldCondition, Filter, MatchValue, Range
 
 logger = logging.getLogger(__name__)
 

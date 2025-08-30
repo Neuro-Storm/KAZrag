@@ -1,13 +1,13 @@
 """Тесты для обработки файлов."""
 
-import pytest
-import os
 import io
+import os
 
 # Устанавливаем ADMIN_API_KEY для тестов до импорта приложения
 os.environ["ADMIN_API_KEY"] = "test_api_key"
 
 from fastapi.testclient import TestClient
+
 from main import app
 
 client = TestClient(app)
@@ -24,7 +24,7 @@ def test_file_processing_size_limit():
     large_file.name = "large_file.pdf"
     
     try:
-        response = client.post(
+        client.post(
             "/api/admin/process-pdfs",
             files={"files": ("large_file.pdf", large_file, "application/pdf")},
             auth=("admin", "test_api_key")
@@ -46,7 +46,7 @@ def test_file_processing_type_limit():
     file_content.name = "test_file.exe"
     
     try:
-        response = client.post(
+        client.post(
             "/api/admin/process-files",
             files={"files": ("test_file.exe", file_content, "application/octet-stream")},
             auth=("admin", "test_api_key")

@@ -1,13 +1,14 @@
 """Модуль для выполнения поиска в Qdrant."""
 
 import logging
-from typing import List, Tuple, Any, Optional, Dict
-from core.qdrant.qdrant_client import aget_qdrant_client
-from config.settings import load_config, Config
+from typing import Any, Dict, List, Optional, Tuple
+
+from config.settings import Config, load_config
 from core.embedding.embeddings import get_dense_embedder, get_search_device
-from core.search.collection_analyzer import CollectionAnalyzer, SearchError
-from core.search.search_strategy import SearchStrategy
+from core.qdrant.qdrant_client import aget_qdrant_client
+from core.search.collection_analyzer import CollectionAnalyzer
 from core.search.search_executor import SearchExecutor
+from core.search.search_strategy import SearchStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,9 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         # Инициализируем sparse embedding для всех режимов поиска, где он может быть нужен
         if has_sparse:
             try:
-                from core.embedding.sparse_embedding_adapter import SparseEmbeddingAdapter
+                from core.embedding.sparse_embedding_adapter import (
+                    SparseEmbeddingAdapter,
+                )
                 sparse_emb = SparseEmbeddingAdapter(config.sparse_embedding)  # Используем config
                 logger.info(f"Sparse embedding adapter initialized: {config.sparse_embedding}")
             except ImportError:
