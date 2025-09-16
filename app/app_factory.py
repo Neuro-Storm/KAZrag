@@ -15,7 +15,42 @@ from app.routes import register_routes
 # Import exception handlers
 from core.utils.exception_handlers import add_exception_handlers
 
+# Import resource path resolver
+from config.resource_path import resource_path
+
 logger = logging.getLogger(__name__)
+
+
+def _parse_allowed_origins(allowed_origins_env: str) -> list:
+    """Parse ALLOWED_ORIGINS environment variable into a list of origins.
+    
+    Args:
+        allowed_origins_env: Environment variable value
+        
+    Returns:
+        List of origins for CORS middleware
+    """
+    # Handle special case of "*" (allow all origins)
+    if allowed_origins_env.strip() == "*":
+        return ["*"]
+    
+    # Split by comma and strip whitespace
+    origins = [origin.strip() for origin in allowed_origins_env.split(',') if origin.strip()]
+    
+    # Validate and normalize origins
+    normalized_origins = []
+    for origin in origins:
+        # Skip empty origins
+        if not origin:
+            continue
+            
+        # Add scheme if missing (assume https for security)
+        if not origin.startswith(('http://', 'https://')):
+            origin = f"https://{origin}"
+            
+        normalized_origins.append(origin)
+    
+    return normalized_origins
 
 
 def create_app() -> FastAPI:
@@ -38,12 +73,8 @@ def create_app() -> FastAPI:
     add_exception_handlers(app)
     
     # Add CORS middleware
-    # Normalize ALLOWED_ORIGINS: '*' -> ['*'], otherwise comma-separated list of origins
     allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "*") or "*"
-    if allowed_origins_env.strip() == "*":
-        allowed_origins = ["*"]
-    else:
-        allowed_origins = [o.strip() for o in allowed_origins_env.split(',') if o.strip()]
+    allowed_origins = _parse_allowed_origins(allowed_origins_env)
     
     app.add_middleware(
         CORSMiddleware,
@@ -54,7 +85,7 @@ def create_app() -> FastAPI:
     )
     
     # Mount static files
-    static_dir = Path("web/static")
+    static_dir = resource_path("web/static")
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
     else:
@@ -74,18 +105,5 @@ def create_app() -> FastAPI:
     async def settings_redirect():
         """Settings route - redirects to admin panel"""
         return RedirectResponse(url="/api/admin/settings/")
-    
-    # Add favicon route that serves the static favicon
-    from fastapi.responses import FileResponse
-    @app.get("/favicon.ico")
-    async def favicon():
-        """Favicon route - serves the static favicon"""
-        favicon_path = Path("web/static/favicon.ico")
-        if favicon_path.exists():
-            return FileResponse(str(favicon_path))
-        else:
-            # Return empty response if favicon not found
-            from fastapi.responses import Response
-            return Response(status_code=204)
     
     return app

@@ -270,7 +270,7 @@ class MultiLevelIndexer:
         # Загружаем точки в Qdrant
         collection_name = getattr(self.config, 'collection_name', DEFAULT_COLLECTION_NAME)
         
-        # Если force_recreate включен, удаляем существующие точки
+        # Если включена перезапись, удаляем существующую коллекцию
         if getattr(self.config, 'force_recreate', False):
             try:
                 self.client.delete_collection(collection_name)

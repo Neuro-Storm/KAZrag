@@ -19,16 +19,8 @@ logger = logging.getLogger(__name__)
 # Get singleton instance of ConfigManager
 config_manager = ConfigManager.get_instance()
 
-# Lazy initialization of converter manager
-_converter_manager = None
-
-
-def _get_converter_manager():
-    """Get or create converter manager instance."""
-    global _converter_manager
-    if _converter_manager is None:
-        _converter_manager = ConverterManager()
-    return _converter_manager
+# Get singleton instance of ConverterManager
+_converter_manager = ConverterManager()
 
 
 def convert_files_to_md(input_dir: str, output_dir: str) -> Tuple[bool, str]:
@@ -63,7 +55,7 @@ def convert_files_to_md(input_dir: str, output_dir: str) -> Tuple[bool, str]:
         logger.info(f"Found files: {stats}")
         
         # Process files
-        results = file_processor.process_files(files_by_type, output_path, _get_converter_manager())
+        results = file_processor.process_files(files_by_type, output_path, _converter_manager)
         
         # Count successful conversions
         successful_conversions = sum(1 for result in results if result.success)
@@ -91,7 +83,7 @@ def get_supported_formats() -> List[str]:
     formats = ['.pdf', '.djvu', '.jpg', '.jpeg', '.png']
     
     # Add formats supported by our converters
-    formats.extend(_get_converter_manager().get_supported_extensions())
+    formats.extend(_converter_manager.get_supported_extensions())
     
     # Remove duplicates and return
     return list(set(formats))

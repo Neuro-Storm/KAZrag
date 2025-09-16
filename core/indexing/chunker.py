@@ -6,7 +6,8 @@ from functools import lru_cache
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_text_splitters.base import TextSplitter
 
-from config.settings import Config, load_config
+from config.config_manager import ConfigManager
+from config.settings import Config
 from core.indexing.paragraph_chunker import ParagraphTextSplitter
 from core.indexing.sentence_chunker import SentenceTextSplitter
 
@@ -77,7 +78,8 @@ def get_text_splitter(
     Returns:
         TextSplitter: Экземпляр подходящего разделителя текста
     """
-    config: Config = load_config()
+    config_manager = ConfigManager.get_instance()
+    config: Config = config_manager.get()
     
     # Используем переданные параметры, если они есть, иначе параметры из конфигурации
     strategy = chunking_strategy if chunking_strategy is not None else config.chunking_strategy

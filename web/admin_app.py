@@ -13,12 +13,45 @@ from fastapi.templating import Jinja2Templates
 
 from config.config_manager import ConfigManager
 from config.settings import Config
-from core.converting.file_converter import run_multi_format_processing_from_config
+from core.converting.multi_format_converter import convert_files_to_md
 from core.indexing.indexer import run_indexing_logic
 from core.qdrant.qdrant_collections import (
     get_cached_collections,
     refresh_collections_cache,
 )
+
+# Initialize config manager
+config_manager = ConfigManager.get_instance()
+
+# Словарь соответствий статусов и их сообщений
+STATUS_MESSAGES = {
+    'saved': 'Настройки сохранены.',
+    'indexed_successfully': 'Индексация успешно завершена!',
+    'indexed_successfully_no_docs': 'Индексация завершена. Не найдено .txt/.md файлов для обработки.',
+    'indexing_started': 'Индексация запущена в фоновом режиме.',
+    'processing_started': 'Обработка запущена в фоновом режиме.',
+    'error_no_collection_selected': 'Ошибка: Не выбрана коллекция для удаления.',
+    'pdfs_processed_successfully': 'PDF файлы успешно обработаны!',
+    'files_processed_successfully': 'Файлы успешно обработаны!',
+}
+
+# Словарь соответствий статусов и их типов (success, error, info)
+STATUS_TYPES = {
+    'saved': 'success',
+    'indexed_successfully': 'success',
+    'indexed_successfully_no_docs': 'success',
+    'indexing_started': 'info',
+    'processing_started': 'info',
+    'pdfs_processed_successfully': 'success',
+    'files_processed_successfully': 'success',
+    'error_no_collection_selected': 'error',
+    'no_index_type': 'error',
+    'delete_error': 'error',
+    'pdf_processing_error': 'error',
+    'file_processing_error': 'error',
+    'save_error': 'error',
+    'indexing_error': 'error',
+}
 from core.utils.dependencies import get_client, get_config
 from core.utils.exception_handlers import get_request_id
 
@@ -45,11 +78,50 @@ def get_templates():
 # Настройка HTTP Basic Authentication
 security = HTTPBasic()
 
-# Получаем API ключ из переменной окружения
-ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
+def get_status_message(status: str) -> str:
+    """Получить текстовое сообщение по коду статуса."""
+    if status in STATUS_MESSAGES:
+        return STATUS_MESSAGES[status]
+    
+    # Обработка специальных случаев
+    if 'error' in status or 'fail' in status or 'no_index_type' in status:
+        return f"Ошибка индексации. Проверьте логи терминала. Сообщение: {status}"
+    
+    if 'deleted_' in status and 'delete_error' not in status:
+        return "Коллекция успешно удалена."
+    
+    if 'delete_error' in status:
+        error_detail = status.split('delete_error_')[-1].replace('_', ' ')
+        return f"Ошибка при удалении коллекции: {error_detail}"
+    
+    if 'pdf_processing_error' in status:
+        return f"Ошибка при обработке PDF. Проверьте логи терминала. Сообщение: {status}"
+    
+    if 'file_processing_error' in status:
+        return f"Ошибка при обработке файлов. Проверьте логи терминала. Сообщение: {status}"
+    
+    # По умолчанию возвращаем сам статус
+    return status
 
-# Get singleton instance of ConfigManager
-config_manager = ConfigManager.get_instance()
+
+def get_status_type(status: str) -> str:
+    """Получить тип статуса (success, error, info)."""
+    # Проверяем точные соответствия
+    if status in STATUS_TYPES:
+        return STATUS_TYPES[status]
+    
+    # Проверяем частичные соответствия
+    for key, value in STATUS_TYPES.items():
+        if key in status:
+            return value
+    
+    # По умолчанию определяем по содержимому
+    if 'success' in status or 'saved' in status or 'indexed' in status or 'deleted_' in status or 'pdfs_processed' in status or 'files_processed' in status:
+        return 'success'
+    elif 'error' in status or 'fail' in status or 'no_index_type' in status or 'delete_error' in status or 'pdf_processing_error' in status or 'file_processing_error' in status:
+        return 'error'
+    else:
+        return 'info'
 
 
 def _check_rate_limit(ip: str, max_requests: int = 10, window: int = 60) -> bool:
@@ -348,6 +420,16 @@ def update_advanced_settings(form_data: dict, config: Config):
         except ValueError:
             raise HTTPException(400, detail="Неверное количество результатов поиска по умолчанию")
     
+    # Настройки reranker
+    config.reranker_enabled = "reranker_enabled" in form_data
+    if form_data.get("reranker_model") is not None:
+        config.reranker_model = form_data["reranker_model"].strip()
+    if form_data.get("reranker_top_k") is not None:
+        try:
+            config.reranker_top_k = int(form_data["reranker_top_k"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное количество результатов после reranking")
+    
     # Настройки подключения к Qdrant
     if form_data.get("qdrant_url") is not None:
         config.qdrant_url = form_data["qdrant_url"].strip()
@@ -388,9 +470,12 @@ async def verify_admin_access_from_form(request: Request, credentials: HTTPBasic
     """Проверяет учетные данные для доступа к админке."""
     request_id = get_request_id(request)
     
+    # Получаем API ключ из переменной окружения
+    ADMIN_API_KEY = os.getenv("ADMIN_API_KEY")
+    
     # Проверка rate-limit
     client_ip = request.client.host if request.client else "unknown"
-    if not _check_rate_limit(client_ip, max_requests=10, window=60):
+    if not _check_rate_limit(client_ip, max_requests=100, window=60):
         logger.warning(f"[{request_id}] Rate limit exceeded for IP: {client_ip}")
         raise HTTPException(
             status_code=429,
@@ -399,12 +484,8 @@ async def verify_admin_access_from_form(request: Request, credentials: HTTPBasic
     
     # Если API ключ не установлен в .env, разрешаем доступ без аутентификации
     if not ADMIN_API_KEY:
-        logger.warning(f"[{request_id}] ADMIN_API_KEY not set, access denied")
-        raise HTTPException(
-            status_code=401,
-            detail="API key not set",
-            headers={"WWW-Authenticate": "Basic"},
-        )
+        logger.warning(f"[{request_id}] ADMIN_API_KEY not set, access granted (no authentication required)")
+        return "anonymous"
     
     # Проверяем учетные данные
     # В данном случае используем API ключ как пароль, имя пользователя может быть любым
@@ -432,12 +513,22 @@ async def get_settings_page(request: Request, status: str = None, username: str 
         # Получаем директорию кэша fastembed из переменных окружения
         fastembed_cache_dir = os.environ.get('FASTEMBED_CACHE_DIR')
         
+        # Формируем сообщение статуса
+        status_message = None
+        status_type = None
+        if status:
+            status_message = get_status_message(status)
+            status_type = get_status_type(status)
+        
         logger.info(f"[{request_id}] Settings page loaded successfully")
         return get_templates().TemplateResponse("settings.html", {
             "request": request,
             "config": config,
             "collections": collections,
-            "delete_status": status,
+            "status": status,
+            "status_message": status_message,
+            "status_type": status_type,
+            "delete_status": status if status and 'delete' in status else None,
             "fastembed_cache_dir": fastembed_cache_dir
         })
     except Exception as e:
@@ -447,7 +538,10 @@ async def get_settings_page(request: Request, status: str = None, username: str 
             "request": request,
             "config": config,
             "collections": [],
-            "delete_status": status,
+            "status": status,
+            "status_message": f"Ошибка загрузки страницы настроек: {str(e)}" if status else None,
+            "status_type": "error" if status else None,
+            "delete_status": status if status and 'delete' in status else None,
             "error": "Ошибка загрузки страницы настроек"
         })
 
@@ -480,7 +574,8 @@ async def delete_collection(request: Request, collection_name: str = Form(...), 
         return JSONResponse(content={"status": status_msg})
     else:
         # Для обычных запросов возвращаем редирект
-        return RedirectResponse(url=f"/settings?status={status_msg}", status_code=303)
+        # При удалении коллекции обычно активна вкладка коллекций
+        return RedirectResponse(url=f"/settings?status={status_msg}&tab=collections", status_code=303)
 
 
 # Обновление настроек приложения с разделением на типы (индексация/MinerU/Дополнительные)
@@ -560,8 +655,9 @@ async def update_settings(
             # Для AJAX запросов возвращаем JSON ответ
             return JSONResponse(content={"status": "saved"})
         else:
-            # Для обычных запросов возвращаем редирект
-            return RedirectResponse(url="/settings?status=saved", status_code=303)
+            # Для обычных запросов возвращаем редирект с информацией о активной вкладке
+            active_tab = form_data.get("active_tab", "indexing")
+            return RedirectResponse(url=f"/settings?status=saved&tab={active_tab}", status_code=303)
             
     except HTTPException:
         # Re-raise HTTP exceptions
@@ -575,8 +671,9 @@ async def update_settings(
             # Для AJAX запросов возвращаем JSON ответ
             return JSONResponse(content={"status": "error", "message": "Ошибка сохранения настроек"})
         else:
-            # Для обычных запросов возвращаем редирект с сообщением об ошибке
-            return RedirectResponse(url="/settings?status=save_error", status_code=303)
+            # Для обычных запросов возвращаем редирект с сообщением об ошибке и информацией о активной вкладке
+            active_tab = form_data.get("active_tab", "indexing")
+            return RedirectResponse(url=f"/settings?status=save_error&tab={active_tab}", status_code=303)
 
 
 @app.post("/run-indexing", response_class=RedirectResponse)
@@ -596,8 +693,9 @@ async def run_indexing(request: Request, background_tasks: BackgroundTasks, user
             # Для AJAX запросов возвращаем JSON ответ
             return JSONResponse(content={"status": "indexing_started"})
         else:
-            # Для обычных запросов возвращаем редирект
-            return RedirectResponse(url="/settings?status=indexing_started", status_code=303)
+            # Для обычных запросов возвращаем редирект с информацией о активной вкладке
+            # При запуске индексации обычно активна вкладка индексации
+            return RedirectResponse(url="/settings?status=indexing_started&tab=indexing", status_code=303)
             
     except Exception as e:
         logger.exception(f"[{request_id}] Error scheduling indexing task: {str(e)}")
@@ -609,7 +707,8 @@ async def run_indexing(request: Request, background_tasks: BackgroundTasks, user
             return JSONResponse(content={"status": "error", "message": "Ошибка запуска индексации"})
         else:
             # Для обычных запросов возвращаем редирект с сообщением об ошибке
-            return RedirectResponse(url="/settings?status=indexing_error", status_code=303)
+            # При ошибке индексации обычно активна вкладка индексации
+            return RedirectResponse(url="/settings?status=indexing_error&tab=indexing", status_code=303)
 
 
 # Эндпоинт для обработки файлов различных форматов
@@ -620,7 +719,13 @@ async def process_files_endpoint(request: Request, background_tasks: BackgroundT
     logger.info(f"[{request_id}] Process files request by user: {username}")
     
     try:
-        background_tasks.add_task(run_multi_format_processing_from_config)
+        # Запускаем обработку файлов в фоновом режиме
+        config = config_manager.get()
+        background_tasks.add_task(
+            convert_files_to_md,
+            input_dir=config.mineru_input_pdf_dir,
+            output_dir=config.mineru_output_md_dir
+        )
         logger.info(f"[{request_id}] Multi-format processing task scheduled successfully")
         
         # Проверяем, является ли запрос AJAX запросом
@@ -630,11 +735,12 @@ async def process_files_endpoint(request: Request, background_tasks: BackgroundT
             # Для AJAX запросов возвращаем JSON ответ
             return JSONResponse(content={"status": "processing_started"})
         else:
-            # Для обычных запросов возвращаем редирект
-            return RedirectResponse(url="/settings?msg=processing_started", status_code=303)
+            # Для обычных запросов возвращаем редирект с информацией о активной вкладке
+            # При запуске обработки файлов обычно активна вкладка конвертации
+            return RedirectResponse(url="/settings?status=processing_started&tab=conversion", status_code=303)
             
     except Exception as e:
-        logger.exception(f"[{request_id}] Error scheduling multi-format processing task: {str(e)}")
+        logger.exception(f"[{request_id}] Error scheduling file processing task: {str(e)}")
         # Проверяем, является ли запрос AJAX запросом
         is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
         
@@ -643,4 +749,5 @@ async def process_files_endpoint(request: Request, background_tasks: BackgroundT
             return JSONResponse(content={"status": "error", "message": "Ошибка запуска обработки файлов"})
         else:
             # Для обычных запросов возвращаем редирект с сообщением об ошибке
-            return RedirectResponse(url="/settings?msg=processing_error", status_code=303)
+            # При ошибке обработки файлов обычно активна вкладка конвертации
+            return RedirectResponse(url="/settings?status=processing_error&tab=conversion", status_code=303)

@@ -12,6 +12,10 @@
                     N/A
                 {% endif %}
                 | <b>Сходство:</b> <mark>{{ '%.4f'|format(score) }}</mark>
+                {% if 'original_score' in result and 'reranker_score' in result %}
+                    | <b>Оригинал:</b> <mark>{{ '%.4f'|format(result.original_score) }}</mark>
+                    | <b>Reranker:</b> <mark>{{ '%.4f'|format(result.reranker_score) }}</mark>
+                {% endif %}
             </header>
             
             <!-- Отображаем содержимое чанка -->

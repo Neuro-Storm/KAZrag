@@ -2,6 +2,7 @@
 
 import importlib
 import logging
+import threading
 from pathlib import Path
 from typing import Dict, List
 
@@ -13,16 +14,27 @@ logger = logging.getLogger(__name__)
 class ConverterManager:
     """Manager for handling different format converters."""
     
+    _instance = None
+    _lock = threading.Lock()
+    
+    def __new__(cls):
+        """Thread-safe singleton implementation."""
+        if cls._instance is None:
+            with cls._lock:
+                # Double-checked locking pattern
+                if cls._instance is None:
+                    cls._instance = super(ConverterManager, cls).__new__(cls)
+        return cls._instance
+    
     def __init__(self):
         """Initialize the converter manager with available converters."""
+        # Check if already initialized to prevent re-initialization
+        if hasattr(self, '_initialized'):
+            return
+            
         self.converters: Dict[str, BaseConverter] = {}
-        self._initialized = False
-    
-    def _initialize_if_needed(self):
-        """Initialize converters only when needed."""
-        if not self._initialized:
-            self._load_converters()
-            self._initialized = True
+        self._load_converters()
+        self._initialized = True
     
     def _load_converters(self):
         """Load available converters dynamically."""
@@ -51,9 +63,6 @@ class ConverterManager:
         if not file_path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
             
-        # Initialize if needed
-        self._initialize_if_needed()
-        
         # Use unstructured converter for all files
         if 'unstructured' in self.converters:
             converter = self.converters['unstructured']
@@ -72,9 +81,6 @@ class ConverterManager:
         Returns:
             List[str]: List of supported extensions
         """
-        # Initialize if needed
-        self._initialize_if_needed()
-        
         # Get supported extensions from unstructured converter
         if 'unstructured' in self.converters:
             converter = self.converters['unstructured']

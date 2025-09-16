@@ -3,7 +3,8 @@
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
-from config.settings import Config, load_config
+from config.config_manager import ConfigManager
+from config.settings import Config
 from core.embedding.embeddings import get_dense_embedder, get_search_device
 from core.qdrant.qdrant_client import aget_qdrant_client
 from core.search.collection_analyzer import CollectionAnalyzer
@@ -31,7 +32,8 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         Tuple[List[Tuple[Any, float]], Optional[str]]: (результаты поиска, ошибка)
     """
     try:
-        config: Config = load_config()
+        config_manager = ConfigManager.get_instance()
+        config: Config = config_manager.get()
         
         # Если k не указано, используем значение из конфигурации
         if k is None:
@@ -118,6 +120,7 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
                 processed_results.append(({
                     'content': content if content is not None else '',
                     'metadata': metadata,
+                    'original_score': score,  # Сохраняем оригинальную оценку
                     'score': score
                 }, score))
         
@@ -155,16 +158,28 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
                             if not content:
                                 content = payload.get('page_content', '')
                             
-                            # Обновляем содержимое в результате
-                            processed_results[i] = ({
-                                'content': content if content is not None else '',
-                                'metadata': result['metadata'],
-                                'score': score
-                            }, score)
+                            # Обновляем содержимое в результате, сохраняя все существующие поля
+                            updated_result = result.copy()  # Копируем все существующие поля
                             
+                            # Обновляем контент только если он не пустой
+                            if content and content.strip():
+                                updated_result['content'] = content
+                            # Если контент пустой, оставляем существующий контент
+                            
+                            processed_results[i] = (updated_result, score)
+                    
                     logger.debug(f"Updated {len(processed_results)} results with content from direct Qdrant query")
             except Exception as retrieve_error:
                 logger.warning(f"Failed to retrieve content directly from Qdrant: {retrieve_error}")
+        
+        # Применяем reranker если включён (после обновления контента)
+        config_manager = ConfigManager.get_instance()
+        config = config_manager.get()
+        if config.reranker_enabled and processed_results:
+            from core.search.reranker_manager import RerankerManager
+            reranker_manager = RerankerManager.get_instance()
+            processed_results = reranker_manager.rerank_documents(query, processed_results, config)
+            logger.debug(f"Reranked to {len(processed_results)} results")
         
         logger.info(f"Search completed successfully with {len(processed_results)} results")
         return processed_results, error
@@ -188,7 +203,8 @@ def search_collections(query: str, k: int = None, metadata_filter: Optional[Dict
     """
     import asyncio
     try:
-        config: Config = load_config()
+        config_manager = ConfigManager.get_instance()
+        config: Config = config_manager.get()
         if k is None:
             k = config.search_default_k
             

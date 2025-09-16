@@ -5,7 +5,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from config.settings import Config
-from core.embedding_manager import EmbeddingError, EmbeddingManager
+from core.embedding.embedding_manager import EmbeddingError, EmbeddingManager
 
 
 class TestEmbeddingManager:
@@ -62,7 +62,7 @@ class TestEmbeddingManager:
         config.embedding_batch_size = 32
         config.device = "cpu"
         
-        with patch('core.embedding_manager.HuggingFaceEmbeddings') as mock_hf_embeddings:
+        with patch('core.embedding.embedding_manager.HuggingFaceEmbeddings') as mock_hf_embeddings:
             mock_embedder = Mock()
             mock_hf_embeddings.return_value = mock_embedder
             
@@ -79,8 +79,8 @@ class TestEmbeddingManager:
         config.embedding_batch_size = 32
         config.device = "cpu"
         
-        with patch('core.embedding_manager.GGUF_AVAILABLE', True):
-            with patch('core.embedding_manager.GGUFEmbeddings') as mock_gguf_embeddings:
+        with patch('core.embedding.embedding_manager.GGUF_AVAILABLE', True):
+            with patch('core.embedding.embedding_manager.GGUFEmbeddings') as mock_gguf_embeddings:
                 mock_embedder = Mock()
                 mock_gguf_embeddings.return_value = mock_embedder
                 
@@ -97,7 +97,7 @@ class TestEmbeddingManager:
         config.embedding_batch_size = 32
         config.device = "cpu"
         
-        with patch('core.embedding_manager.GGUF_AVAILABLE', False):
+        with patch('core.embedding.embedding_manager.GGUF_AVAILABLE', False):
             with pytest.raises(EmbeddingError):
                 manager.get_embedder(config, "cpu")
 
@@ -110,7 +110,7 @@ class TestEmbeddingManager:
         config.embedding_batch_size = 32
         config.device = "cpu"
         
-        with patch('core.embedding_manager.HuggingFaceEmbeddings') as mock_hf_embeddings:
+        with patch('core.embedding.embedding_manager.HuggingFaceEmbeddings') as mock_hf_embeddings:
             mock_embedder1 = Mock()
             mock_embedder2 = Mock()
             mock_hf_embeddings.side_effect = [mock_embedder1, mock_embedder2]
@@ -134,7 +134,7 @@ class TestEmbeddingManager:
         manager = EmbeddingManager()
         
         # Add something to cache
-        manager._embedder_cache[("model", "cpu")] = Mock()
+        manager._embedder_cache[(("model", "cpu"))] = Mock()
         
         # Clear cache
         manager.clear_cache()
@@ -147,8 +147,8 @@ class TestEmbeddingManager:
         manager = EmbeddingManager()
         
         # Add something to cache
-        manager._embedder_cache[("model1", "cpu")] = Mock()
-        manager._embedder_cache[("model2", "cuda")] = Mock()
+        manager._embedder_cache[(("model1", "cpu"))] = Mock()
+        manager._embedder_cache[(("model2", "cuda"))] = Mock()
         
         cache_info = manager.get_cache_info()
         assert cache_info["cache_size"] == 2
@@ -167,3 +167,80 @@ class TestEmbeddingManager:
         with patch('core.embedding_manager.HuggingFaceEmbeddings', side_effect=Exception("Model load failed")):
             with pytest.raises(EmbeddingError):
                 manager.get_embedder(config, "cpu")
+
+    def test_get_device_invalid_input(self):
+        """Test getting device with invalid input."""
+        manager = EmbeddingManager()
+        
+        with patch('torch.cuda.is_available', return_value=False):
+            # Should default to cpu for invalid device
+            device = manager.get_device("invalid_device")
+            assert device == "cpu"
+
+    def test_get_embedder_empty_model_name(self):
+        """Test getting embedder with empty model name."""
+        manager = EmbeddingManager()
+        
+        config = Config()
+        config.current_hf_model = ""
+        config.embedding_batch_size = 32
+        config.device = "cpu"
+        
+        with pytest.raises(EmbeddingError):
+            manager.get_embedder(config, "cpu")
+
+    def test_embedder_caching_with_different_models(self):
+        """Test embedder caching with different models."""
+        manager = EmbeddingManager()
+        
+        config1 = Config()
+        config1.current_hf_model = "sentence-transformers/all-MiniLM-L6-v2"
+        config1.embedding_batch_size = 32
+        config1.device = "cpu"
+        
+        config2 = Config()
+        config2.current_hf_model = "sentence-transformers/all-MiniLM-L12-v2"
+        config2.embedding_batch_size = 32
+        config2.device = "cpu"
+        
+        with patch('core.embedding_manager.HuggingFaceEmbeddings') as mock_hf_embeddings:
+            mock_embedder1 = Mock()
+            mock_embedder2 = Mock()
+            mock_hf_embeddings.side_effect = [mock_embedder1, mock_embedder2]
+            
+            # Get embedder for first model
+            embedder1 = manager.get_embedder(config1, "cpu")
+            assert embedder1 is mock_embedder1
+            
+            # Get embedder for second model - should create new instance
+            embedder2 = manager.get_embedder(config2, "cpu")
+            assert embedder2 is mock_embedder2
+            assert mock_hf_embeddings.call_count == 2
+
+    def test_get_cache_info_empty_cache(self):
+        """Test getting cache information when cache is empty."""
+        manager = EmbeddingManager()
+        
+        # Clear cache
+        manager.clear_cache()
+        
+        cache_info = manager.get_cache_info()
+        assert cache_info["cache_size"] == 0
+        assert cache_info["max_cache_size"] == 3
+        assert len(cache_info["cached_models"]) == 0
+
+    @pytest.mark.parametrize("device_input,expected_device,cuda_available", [
+        ("cuda", "cuda", True),
+        ("cuda", "cpu", False),
+        ("cpu", "cpu", True),
+        ("cpu", "cpu", False),
+        ("auto", "cuda", True),
+        ("auto", "cpu", False),
+    ])
+    def test_get_device_parametrized(self, device_input, expected_device, cuda_available):
+        """Parametrized test for getting device."""
+        manager = EmbeddingManager()
+        
+        with patch('torch.cuda.is_available', return_value=cuda_available):
+            device = manager.get_device(device_input)
+            assert device == expected_device

@@ -21,12 +21,14 @@ logger = logging.getLogger(__name__)
 config_manager = ConfigManager.get_instance()
 
 
-async def run_indexing_logic(client=None) -> Tuple[bool, str]:
+async def run_indexing_logic(client=None, pre_chunked_documents=None) -> Tuple[bool, str]:
     """
     Основная логика индексации документов.
     
     Args:
         client (QdrantClient, optional): Клиент Qdrant. Если не указан, создается новый.
+        pre_chunked_documents (List[Document], optional): Предварительно нарезанные документы. 
+            Если указаны, используются вместо загрузки и нарезки файлов.
         
     Returns:
         Tuple[bool, str]: (успех, статус)
@@ -42,96 +44,106 @@ async def run_indexing_logic(client=None) -> Tuple[bool, str]:
         if not (index_dense or index_bm25 or index_hybrid):
             return False, "no_index_type"
         
-        folder_path = Path(config.folder_path)
-        folder_path_resolved = folder_path.resolve()  # Для получения относительных путей
-        if not folder_path.is_dir():
-            return False, "folder_not_found"
-        
-        # Проверяем, нужно ли использовать многоуровневый чанкинг
-        use_multilevel_chunking = getattr(config, 'use_multilevel_chunking', False)
-        
-        if use_multilevel_chunking:
-            # Используем многоуровневый индексатор
-            logger.info("Используется многоуровневый индексатор")
-            multilevel_indexer = MultiLevelIndexer(config)
+        # Если предоставлены предварительно нарезанные документы, используем их
+        if pre_chunked_documents is not None:
+            logger.info(f"Используются предварительно нарезанные документы: {len(pre_chunked_documents)} чанков")
+            all_documents = pre_chunked_documents
+            folder_path_resolved = Path(config.folder_path).resolve()
             
-            # Собираем все документы
-            all_documents = []
-            document_loader = DocumentLoader()
-            
-            # Обрабатываем .txt файлы
-            for filepath in folder_path.rglob("*.txt"):
-                try:
-                    loaded_docs = document_loader.load_text_file(filepath)
-                    # Для многоуровневого чанкинга не нужно предварительно разбивать на чанки
-                    processed_docs = _process_documents_without_chunking(loaded_docs, filepath, folder_path_resolved, config)
-                    all_documents.extend(processed_docs)
-                except Exception as e:
-                    logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
-                    raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
-            
-            # Обрабатываем .md файлы
-            for filepath in folder_path.rglob("*.md"):
-                try:
-                    logger.info(f"Загрузка .md файла: {filepath}")
-                    loaded_docs = document_loader.load_text_file(filepath)
-                    logger.info(f"Загружено {len(loaded_docs)} документов из файла: {filepath}")
-                    # Для многоуровневого чанкинга не нужно предварительно разбивать на чанки
-                    processed_docs = _process_documents_without_chunking(loaded_docs, filepath, folder_path_resolved, config)
-                    all_documents.extend(processed_docs)
-                    logger.info(f"После обработки файла {filepath} всего документов: {len(all_documents)}")
-                except Exception as e:
-                    logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
-                    raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
-            
-            logger.info(f"Всего собрано документов: {len(all_documents)}")
-            
-            # Индексируем все документы с использованием многоуровневого индексатора
-            # Временно используем синхронный вызов, так как multilevel_indexer.index_documents_multilevel не async
-            stats = multilevel_indexer.index_documents_multilevel(all_documents)
-            logger.info(f"Индексация завершена: {stats}")
-            
-            success = True
-            status = "indexed_successfully"
-        else:
-            # Используем обычный индексатор
-            logger.info("Используется обычный индексатор")
-            
-            # Создаем компоненты
-            document_loader = DocumentLoader()
-            text_splitter = TextSplitter(config)
+            # Создаем индексер и индексируем документы
             indexer = Indexer(config)
-            
-            # Собираем все документы
-            all_documents = []
-            
-            # Обрабатываем .txt файлы
-            for filepath in folder_path.rglob("*.txt"):
-                try:
-                    loaded_docs = document_loader.load_text_file(filepath)
-                    chunks = text_splitter.split_documents(loaded_docs)
-                    processed_chunks = _process_chunks(chunks, filepath, folder_path_resolved, config)
-                    all_documents.extend(processed_chunks)
-                except Exception as e:
-                    logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
-                    raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
-            
-            # Обрабатываем .md файлы
-            for filepath in folder_path.rglob("*.md"):
-                try:
-                    loaded_docs = document_loader.load_text_file(filepath)
-                    chunks = text_splitter.split_documents(loaded_docs)
-                    processed_chunks = _process_chunks(chunks, filepath, folder_path_resolved, config)
-                    all_documents.extend(processed_chunks)
-                except Exception as e:
-                    logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
-                    raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
-            
-            # Индексируем все документы
             success, status = await indexer.index_documents(all_documents, client, folder_path_resolved)
+        else:
+            folder_path = Path(config.folder_path)
+            folder_path_resolved = folder_path.resolve()  # Для получения относительных путей
+            if not folder_path.is_dir():
+                return False, "folder_not_found"
+            
+            # Проверяем, нужно ли использовать многоуровневый чанкинг
+            use_multilevel_chunking = getattr(config, 'use_multilevel_chunking', False)
+            
+            if use_multilevel_chunking:
+                # Используем многоуровневый индексатор
+                logger.info("Используется многоуровневый индексатор")
+                multilevel_indexer = MultiLevelIndexer(config)
+                
+                # Собираем все документы
+                all_documents = []
+                document_loader = DocumentLoader()
+                
+                # Обрабатываем .txt файлы
+                for filepath in folder_path.rglob("*.txt"):
+                    try:
+                        loaded_docs = document_loader.load_text_file(filepath)
+                        # Для многоуровневого чанкинга не нужно предварительно разбивать на чанки
+                        processed_docs = _process_documents_without_chunking(loaded_docs, filepath, folder_path_resolved, config)
+                        all_documents.extend(processed_docs)
+                    except Exception as e:
+                        logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
+                        raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
+                
+                # Обрабатываем .md файлы
+                for filepath in folder_path.rglob("*.md"):
+                    try:
+                        logger.info(f"Загрузка .md файла: {filepath}")
+                        loaded_docs = document_loader.load_text_file(filepath)
+                        logger.info(f"Загружено {len(loaded_docs)} документов из файла: {filepath}")
+                        # Для многоуровневого чанкинга не нужно предварительно разбивать на чанки
+                        processed_docs = _process_documents_without_chunking(loaded_docs, filepath, folder_path_resolved, config)
+                        all_documents.extend(processed_docs)
+                        logger.info(f"После обработки файла {filepath} всего документов: {len(all_documents)}")
+                    except Exception as e:
+                        logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
+                        raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
+                
+                logger.info(f"Всего собрано документов: {len(all_documents)}")
+                
+                # Индексируем все документы с использованием многоуровневого индексатора
+                # Временно используем синхронный вызов, так как multilevel_indexer.index_documents_multilevel не async
+                stats = multilevel_indexer.index_documents_multilevel(all_documents)
+                logger.info(f"Индексация завершена: {stats}")
+                
+                success = True
+                status = "indexed_successfully"
+            else:
+                # Используем обычный индексатор
+                logger.info("Используется обычный индексатор")
+                
+                # Создаем компоненты
+                document_loader = DocumentLoader()
+                text_splitter = TextSplitter(config)
+                indexer = Indexer(config)
+                
+                # Собираем все документы
+                all_documents = []
+                
+                # Обрабатываем .txt файлы
+                for filepath in folder_path.rglob("*.txt"):
+                    try:
+                        loaded_docs = document_loader.load_text_file(filepath)
+                        chunks = text_splitter.split_documents(loaded_docs)
+                        processed_chunks = _process_chunks(chunks, filepath, folder_path_resolved, config)
+                        all_documents.extend(processed_chunks)
+                    except Exception as e:
+                        logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
+                        raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
+                
+                # Обрабатываем .md файлы
+                for filepath in folder_path.rglob("*.md"):
+                    try:
+                        loaded_docs = document_loader.load_text_file(filepath)
+                        chunks = text_splitter.split_documents(loaded_docs)
+                        processed_chunks = _process_chunks(chunks, filepath, folder_path_resolved, config)
+                        all_documents.extend(processed_chunks)
+                    except Exception as e:
+                        logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
+                        raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
+                
+                # Индексируем все документы
+                success, status = await indexer.index_documents(all_documents, client, folder_path_resolved)
         
-        # Обновляем конфигурацию
-        if success:
+        # Обновляем конфигурацию (только если не используются предварительно нарезанные документы)
+        if success and pre_chunked_documents is None:
             config.is_indexed = True
             config_manager.save(config)
         

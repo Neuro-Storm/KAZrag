@@ -63,6 +63,7 @@ async def handle_search(
     k: int = Form(None),  # Используем None как значение по умолчанию
     search_type: str = Form("dense"),  # Новый параметр для типа поиска
     hybrid: bool = Form(False),  # Для обратной совместимости
+    use_reranker: bool = Form(True),  # Переключатель для использования reranker
     filter_author: str = Form(None),  # Фильтр по автору
     filter_source: str = Form(None),  # Фильтр по источнику
     filter_file_extension: str = Form(None),  # Фильтр по типу файла
@@ -114,8 +115,19 @@ async def handle_search(
         if not metadata_filter_dict:
             metadata_filter_dict = None
         
+        # Сохраняем оригинальную настройку reranker
+        original_reranker_enabled = config.reranker_enabled
+        
+        # Если пользователь явно указал не использовать reranker, временно отключаем его
+        if not use_reranker:
+            config.reranker_enabled = False
+        
         results, error = await search_in_collection(query, collection, search_device, k, hybrid=hybrid, 
                                                   metadata_filter=metadata_filter_dict, client=client)
+        
+        # Восстанавливаем оригинальную настройку reranker
+        config.reranker_enabled = original_reranker_enabled
+        
         collections = get_cached_collections(client=client)
         
         template_context = {
@@ -128,10 +140,12 @@ async def handle_search(
             "selected_search_device": search_device,
             "hybrid": hybrid,
             "selected_search_type": search_type,
+            "use_reranker": use_reranker,
             "filter_author": filter_author,
             "filter_source": filter_source,
             "filter_file_extension": filter_file_extension,
-            "metadata_filter": metadata_filter
+            "metadata_filter": metadata_filter,
+            "config": config
         }
         
         # Если есть ошибка, добавляем её в контекст шаблона

@@ -263,23 +263,28 @@ class TestWebAPIIntegration:
                     assert response_data["status"] == "indexing_started"
 
     def test_process_pdfs_endpoint(self, client):
-        """Test process PDFs endpoint."""
-        with patch('web.admin_app.verify_admin_access_from_form', return_value="admin"):
-            with patch('web.admin_app.BackgroundTasks') as mock_background_tasks:
-                mock_task_instance = Mock()
-                mock_background_tasks.return_value = mock_task_instance
-                
-                with patch('web.admin_app.run_pdf_processing_from_config'):
-                    # Make the request
-                    response = client.post(
-                        "/api/admin/process-pdfs",
-                        headers={"X-Requested-With": "XMLHttpRequest"}
-                    )
-                    
-                    # Check response
-                    assert response.status_code == 200
-                    response_data = response.json()
-                    assert response_data["status"] == "processing_started"
+        """Test the process PDFs endpoint."""
+        # Mock successful PDF processing
+        with patch('web.admin_app.run_pdf_processing_from_config') as mock_process:
+            mock_process.return_value = "processed_5_files"
+            
+            # Prepare test files
+            files = [
+                ("files", ("test1.pdf", BytesIO(b"%PDF-1.4 test content 1"), "application/pdf")),
+                ("files", ("test2.pdf", BytesIO(b"%PDF-1.4 test content 2"), "application/pdf"))
+            ]
+            
+            # Make the request
+            response = client.post(
+                "/api/admin/process-pdfs",
+                files=files,
+                auth=("admin", "test_api_key")
+            )
+            
+            # Check response
+            assert response.status_code == 200
+            assert "PDF файлы успешно обработаны" in response.text or "PDF files processed successfully" in response.text
+            mock_process.assert_called_once()
 
     def test_process_files_endpoint(self, client):
         """Test process files endpoint."""
@@ -288,7 +293,7 @@ class TestWebAPIIntegration:
                 mock_task_instance = Mock()
                 mock_background_tasks.return_value = mock_task_instance
                 
-                with patch('web.admin_app.run_multi_format_processing_from_config'):
+                with patch('web.admin_app.convert_files_to_md'):
                     # Make the request
                     response = client.post(
                         "/api/admin/process-files",
@@ -313,6 +318,48 @@ class TestWebAPIIntegration:
         assert response.status_code == 200  # Follows redirect
         # Should contain settings page content
         assert "Настройки" in response.text or "Settings" in response.text
+
+    def test_search_endpoint_invalid_collection(self, client):
+        """Test search endpoint with invalid collection."""
+        # Prepare search data with invalid collection
+        search_data = {
+            "query": "test query",
+            "collection": "nonexistent-collection",
+            "search_device": "cpu",
+            "k": "5",
+            "search_type": "dense"
+        }
+        
+        with patch('web.search_app.get_cached_collections', return_value=['test-collection']):
+            # Make the request
+            response = client.post("/api/search/", data=search_data)
+            
+            # Should handle invalid collection gracefully
+            assert response.status_code == 200
+
+    def test_update_settings_endpoint_invalid_data(self, client):
+        """Test update settings endpoint with invalid data."""
+        # Prepare invalid settings data
+        settings_data = {
+            "action": "save_index_settings",
+            "folder_path": "",  # Empty folder path
+            "collection_name": "test-collection"
+        }
+        
+        with patch('web.admin_app.verify_admin_access_from_form', return_value="admin"):
+            with patch('web.admin_app.config_manager') as mock_config_manager:
+                mock_config = Config()
+                mock_config_manager.get_instance().get.return_value = mock_config
+                
+                # Make the request
+                response = client.post(
+                    "/api/admin/update-settings",
+                    data=settings_data,
+                    headers={"X-Requested-With": "XMLHttpRequest"}
+                )
+                
+                # Should handle invalid data gracefully
+                assert response.status_code == 200
 
 
 class TestWebAPIErrorHandling:
@@ -387,3 +434,58 @@ class TestWebAPIErrorHandling:
                 assert response.status_code == 200
                 response_data = response.json()
                 assert response_data["status"] == "error"
+
+    def test_search_endpoint_sparse_search(self, client):
+        """Test search endpoint with sparse search."""
+        # Prepare search data for sparse search
+        search_data = {
+            "query": "sparse search query",
+            "collection": "test-collection",
+            "search_device": "cpu",
+            "k": "5",
+            "search_type": "sparse"
+        }
+        
+        # Mock search results
+        mock_results = [
+            (Document(page_content="Sparse search result", metadata={"source": "sparse.txt"}), 0.75)
+        ]
+        
+        with patch('web.search_app.search_in_collection') as mock_search:
+            with patch('web.search_app.get_cached_collections', return_value=['test-collection']):
+                mock_search.return_value = (mock_results, None)
+                
+                # Make the request
+                response = client.post("/api/search/", data=search_data)
+                
+                # Check response
+                assert response.status_code == 200
+                assert "Sparse search result" in response.text
+
+    @pytest.mark.parametrize("search_type", ["dense", "sparse", "hybrid"])
+    def test_search_endpoint_parametrized_search_types(self, client, search_type):
+        """Parametrized test for search endpoint with different search types."""
+        # Prepare search data
+        search_data = {
+            "query": "test query",
+            "collection": "test-collection",
+            "search_device": "cpu",
+            "k": "5",
+            "search_type": search_type
+        }
+        
+        # Mock search results
+        mock_results = [
+            (Document(page_content=f"{search_type} search result", metadata={"source": f"{search_type}.txt"}), 0.9)
+        ]
+        
+        with patch('web.search_app.search_in_collection') as mock_search:
+            with patch('web.search_app.get_cached_collections', return_value=['test-collection']):
+                mock_search.return_value = (mock_results, None)
+                
+                # Make the request
+                response = client.post("/api/search/", data=search_data)
+                
+                # Check response
+                assert response.status_code == 200
+                assert f"{search_type} search result" in response.text

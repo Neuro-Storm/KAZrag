@@ -35,7 +35,7 @@ class EmbeddingManager:
     """Centralized manager for embeddings with caching."""
     
     _instance: Optional['EmbeddingManager'] = None
-    MAX_CACHE_SIZE = 3  # Максимум 3 модели в кэше одновременно
+    MAX_CACHE_SIZE = 1  # Максимум 1 модель в кэше одновременно
     
     def __init__(self):
         """Initialize EmbeddingManager."""
@@ -113,9 +113,22 @@ class EmbeddingManager:
             # Подготовка параметров для загрузки модели
             model_kwargs = {"device": device}
             encode_kwargs = {"batch_size": batch_size}
-            # Если используем CUDA, указываем dtype через encode_kwargs
+            # Если используем CUDA, указываем dtype через encode_kwargs для поддерживающих моделей
             if device == "cuda":
-                encode_kwargs["torch_dtype"] = torch.float16
+                # Добавляем torch_dtype только для моделей, которые это поддерживают
+                # Проверяем по названию модели или по другим критериям
+                unsupported_models = ["qwen", "qwen3"]
+                model_lower = model_name.lower()
+                
+                # Если модель не в списке неподдерживающих, добавляем torch_dtype
+                if not any(unsupported in model_lower for unsupported in unsupported_models):
+                    encode_kwargs["torch_dtype"] = torch.float16
+                else:
+                    logger.debug(f"Модель {model_name} не поддерживает torch_dtype, используем стандартный тип данных")
+            
+            # Если указан токен HuggingFace, добавляем его в model_kwargs
+            if config.huggingface_token:
+                model_kwargs["token"] = config.huggingface_token
 
             # Если модель не найдена в кеше или batch_size изменился, создаем новую
             embedder = HuggingFaceEmbeddings(
@@ -184,6 +197,14 @@ class EmbeddingManager:
         """Очищает кэш эмбеддеров."""
         self._embedder_cache.clear()
         logger.info("Кэш эмбеддеров очищен")
+        
+        # Принудительно очищаем память PyTorch
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except ImportError:
+            pass
     
     def get_cache_info(self) -> Dict[str, Any]:
         """Получает информацию о кэше эмбеддеров.

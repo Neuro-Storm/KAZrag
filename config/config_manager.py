@@ -1,35 +1,37 @@
-"""Module for centralized configuration management."""
+"""Module for centralized configuration management using pydantic-settings."""
 
-import functools
 import json
 import logging
-import time
-from typing import Any, Optional
+from typing import Optional, Dict, Any
+from pathlib import Path
 
+from cachetools import TTLCache
 from pydantic import ValidationError
 
-from config.settings import CONFIG_FILE, DEFAULT_CACHE_TTL, Config
+from config.settings_model import Config
+from config.resource_path import resource_path
 
 logger = logging.getLogger(__name__)
 
 
 class ConfigManager:
-    """Centralized configuration manager with caching and validation."""
+    """Centralized configuration manager with caching and validation using pydantic-settings."""
     
     _instance: Optional['ConfigManager'] = None
     
-    def __init__(self, cache_ttl: int = DEFAULT_CACHE_TTL):
+    def __init__(self, cache_ttl: int = 60):
         """Initialize ConfigManager.
         
         Args:
             cache_ttl: Time to live for cached configuration in seconds
         """
         self.cache_ttl = cache_ttl
-        # Use functools.lru_cache for configuration caching
-        self._get_config_cached = functools.lru_cache(maxsize=1)(self._load_config_from_file)
+        # Use TTLCache for configuration caching
+        self._cache = TTLCache(maxsize=1, ttl=cache_ttl)
+        self._config_instance: Optional[Config] = None
         
     @classmethod
-    def get_instance(cls, cache_ttl: int = DEFAULT_CACHE_TTL) -> 'ConfigManager':
+    def get_instance(cls, cache_ttl: int = 60) -> 'ConfigManager':
         """Get singleton instance of ConfigManager.
         
         Args:
@@ -49,14 +51,16 @@ class ConfigManager:
             Config: Loaded configuration object
         """
         logger.debug("Loading configuration from file")
-        if not CONFIG_FILE.exists():
+        config_file = resource_path("config/config.json")
+        
+        if not config_file.exists():
             # Create default config if file doesn't exist
             config = Config()
             self.save(config)
             return config
             
         try:
-            with open(CONFIG_FILE, encoding="utf-8") as f:
+            with open(config_file, encoding="utf-8") as f:
                 config_dict = json.load(f)
                 
             # Create Config object with validation
@@ -77,26 +81,42 @@ class ConfigManager:
             self.save(config)
             return config
     
+    def _load_config_from_settings(self) -> Config:
+        """Load configuration from environment variables and settings.
+        
+        Returns:
+            Config: Loaded configuration object
+        """
+        try:
+            # Load config from environment variables and defaults
+            config = Config()
+            return config
+        except Exception as e:
+            logger.exception(f"Error loading configuration from settings: {e}")
+            # Fallback to file-based config
+            return self._load_config_from_file()
+    
     def load(self) -> Config:
         """Load configuration from file with caching.
         
         Returns:
             Config: Loaded configuration object
         """
-        current_time = time.time()
-        
         # Check if we have a valid cached config
-        # We'll use a simple time-based check to invalidate the cache
-        if hasattr(self, '_last_load_time') and current_time - self._last_load_time <= self.cache_ttl:
+        if 'config' in self._cache:
             logger.debug("Returning cached configuration")
-            return self._cached_config
+            return self._cache['config']
         
-        # Load fresh config
-        config = self._get_config_cached()
+        # Try to load from file first
+        try:
+            config = self._load_config_from_file()
+        except Exception as e:
+            logger.warning(f"Failed to load config from file, falling back to settings: {e}")
+            # Fallback to settings-based config
+            config = self._load_config_from_settings()
         
         # Update cache
-        self._cached_config = config
-        self._last_load_time = current_time
+        self._cache['config'] = config
         
         return config
     
@@ -107,20 +127,11 @@ class ConfigManager:
             config: Configuration object to save
         """
         try:
-            # Convert Config to dict
-            config_dict = config.model_dump()
-            
             # Save to file
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(config_dict, f, indent=4, ensure_ascii=False)
-                
-            # Update cache
-            self._cached_config = config
-            if hasattr(self, '_last_load_time'):
-                self._last_load_time = time.time()
+            config.save_to_file()
             
-            # Clear the lru_cache
-            self._get_config_cached.cache_clear()
+            # Update cache
+            self._cache['config'] = config
             
             logger.info("Configuration saved successfully")
             
@@ -142,41 +153,37 @@ class ConfigManager:
         Returns:
             Config: Reloaded configuration object
         """
-        # Clear the lru_cache
-        self._get_config_cached.cache_clear()
-        
-        # Clear our own cache
-        if hasattr(self, '_last_load_time'):
-            delattr(self, '_last_load_time')
-        if hasattr(self, '_cached_config'):
-            delattr(self, '_cached_config')
+        # Clear the cache
+        self._cache.clear()
         
         # Load fresh config
         return self.load()
     
-    def get_value(self, key: str, default: Any = None) -> Any:
-        """Get a specific configuration value by key.
+    def update_from_dict(self, updates: Dict[str, Any]) -> Config:
+        """Update configuration from dictionary.
         
         Args:
-            key: Configuration key
-            default: Default value if key not found
+            updates: Dictionary with configuration updates
             
         Returns:
-            Any: Configuration value or default
+            Config: Updated configuration object
         """
-        config = self.get()
-        return getattr(config, key, default)
-    
-    def set_value(self, key: str, value: Any) -> None:
-        """Set a specific configuration value by key.
-        
-        Args:
-            key: Configuration key
-            value: Value to set
-        """
-        config = self.get()
-        if hasattr(config, key):
-            setattr(config, key, value)
-            self.save(config)
-        else:
-            raise AttributeError(f"Configuration has no attribute '{key}'")
+        try:
+            # Get current config
+            current_config = self.get()
+            
+            # Convert to dict and update
+            config_dict = current_config.model_dump()
+            config_dict.update(updates)
+            
+            # Create new config object
+            updated_config = Config(**config_dict)
+            
+            # Save updated config
+            self.save(updated_config)
+            
+            return updated_config
+            
+        except Exception as e:
+            logger.exception(f"Error updating configuration: {e}")
+            raise

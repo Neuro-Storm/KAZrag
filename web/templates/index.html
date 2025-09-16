@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <title>Поиск по документам</title>
     <link rel="stylesheet" href="/static/simple.min.css">
+    <!-- Подключаем Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>
         .metadata-filter-section {
             border: 1px solid #ddd;
@@ -84,7 +86,7 @@
         <h1>Поиск по документам</h1>
         <nav><a href="/">Поиск</a> <a href="/settings/">Настройки</a></nav>
     </header>
-    <main>
+    <main x-data="{ showAdvancedFilter: false }">
         <form id="search-form">
             <div class="grid">
                 <label for="collection">Искать в коллекции
@@ -109,7 +111,7 @@
             <input type="number" name="k" id="k" value="{{ k or config.search_default_k if config else 5 }}" min="1" max="100">
             
             <!-- Фильтр по метаданным под спойлером -->
-            <button type="button" class="collapsible">Фильтр по метаданным</button>
+            <button type="button" class="collapsible" @click="showAdvancedFilter = !showAdvancedFilter">Фильтр по метаданным</button>
             <div class="content">
                 <div class="metadata-filter-section">
                     <h3>Параметры фильтрации</h3>
@@ -136,7 +138,7 @@
                     </div>
                     
                     <!-- Поле для произвольного JSON фильтра (для продвинутых пользователей) -->
-                    <div id="advanced-filter-section" style="display: none;">
+                    <div id="advanced-filter-section" x-show="showAdvancedFilter">
                         <label for="metadata_filter">Произвольный фильтр (JSON):</label>
                         <input type="text" name="metadata_filter" id="metadata_filter" placeholder='{"author": "Иванов", "year": 2023}' value="{{ metadata_filter or '' }}">
                         <p class="help-text">Примеры: {"author": "Иванов"}, {"year": {"$gt": 2020}}, {"tags": {"$contains": "важно"}}</p>
@@ -157,6 +159,14 @@
                 <!-- Hidden field to store hybrid flag for backward compatibility -->
                 <input type="hidden" id="hybrid" name="hybrid" value="{{ 'True' if hybrid else 'False' }}">
             </fieldset>
+            
+            {% if config.reranker_enabled %}
+            <fieldset>
+                <legend>Reranker</legend>
+                <input type="checkbox" id="use_reranker" name="use_reranker" value="True" {% if use_reranker != false %}checked{% endif %}>
+                <label for="use_reranker">Использовать reranker для переоценки результатов</label>
+            </fieldset>
+            {% endif %}
             <button type="submit">Найти</button>
         </form>
         
@@ -174,8 +184,7 @@
                 <h2>Результаты поиска ({{ results|length }}):</h2>
                 {% for result, score in results %}
                     <article>
-                        <header>
-                            <b>Источник:</b> 
+                                                    | <b>Источник:</b> 
                             {% if result.source %}
                                 {{ result.source }}
                             {% elif result.metadata.source %}
@@ -184,7 +193,10 @@
                                 N/A
                             {% endif %}
                             | <b>Сходство:</b> <mark>{{ '%.4f'|format(score) }}</mark>
-                        </header>
+                            {% if 'original_score' in result and 'reranker_score' in result %}
+                                | <b>Оригинал:</b> <mark>{{ '%.4f'|format(result.original_score) }}</mark>
+                                | <b>Reranker:</b> <mark>{{ '%.4f'|format(result.reranker_score) }}</mark>
+                            {% endif %}
                         
                         <!-- Отображаем содержимое чанка -->
                         <p>{{ result.content or result.page_content or "Содержимое недоступно" }}</p>
@@ -224,34 +236,7 @@
     </main>
     <script src="/static/ajax.js"></script>
     <script>
-        // Переключение видимости расширенного фильтра
-        function toggleAdvancedFilter() {
-            const section = document.getElementById('advanced-filter-section');
-            const toggleLink = document.getElementById('toggle-advanced-filter');
-            if (section.style.display === 'none') {
-                section.style.display = 'block';
-                toggleLink.textContent = 'Скрыть расширенный фильтр';
-            } else {
-                section.style.display = 'none';
-                toggleLink.textContent = 'Показать расширенный фильтр';
-            }
-        }
-        
-        // Обработчик для спойлера фильтра по метаданным
-        document.addEventListener('DOMContentLoaded', function() {
-            var coll = document.getElementsByClassName("collapsible");
-            for (var i = 0; i < coll.length; i++) {
-                coll[i].addEventListener("click", function() {
-                    this.classList.toggle("active");
-                    var content = this.nextElementSibling;
-                    if (content.style.display === "block") {
-                        content.style.display = "none";
-                    } else {
-                        content.style.display = "block";
-                    }
-                });
-            }
-        });
+        // Alpine.js теперь управляет видимостью advanced фильтра
     </script>
 </body>
 </html>

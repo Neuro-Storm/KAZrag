@@ -6,6 +6,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client.http.models import FieldCondition, Filter, MatchValue, Range
 
+from core.search.reranker_manager import RerankerManager
+from config.config_manager import ConfigManager
+
 logger = logging.getLogger(__name__)
 
 
@@ -106,7 +109,7 @@ class SearchExecutor:
                 extended_result = {
                     'content': content if content is not None else '',
                     'metadata': metadata,
-                    'score': score
+                    'original_score': score  # Сохраняем оригинальную оценку
                 }
                 
                 # Если это многоуровневый чанк, добавляем информацию о микро-чанках
@@ -126,6 +129,14 @@ class SearchExecutor:
                 processed_results.append((extended_result, score))
                 
             logger.debug(f"Search returned {len(processed_results)} results")
+            
+            # Log first result before returning to see what we have
+            if processed_results:
+                first_result, first_score = processed_results[0]
+                logger.debug(f"Before returning - First result score: {first_score}, keys: {list(first_result.keys()) if isinstance(first_result, dict) else 'not dict'}")
+                if isinstance(first_result, dict):
+                    logger.debug(f"Before returning - original_score: {first_result.get('original_score')}")
+            
             return processed_results, None
             
         except Exception as e:

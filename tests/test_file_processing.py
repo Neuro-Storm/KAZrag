@@ -1,6 +1,5 @@
 """Тесты для обработки файлов."""
 
-import io
 import os
 
 # Устанавливаем ADMIN_API_KEY для тестов до импорта приложения
@@ -8,8 +7,9 @@ os.environ["ADMIN_API_KEY"] = "test_api_key"
 
 from fastapi.testclient import TestClient
 
-from main import app
+from app.app_factory import create_app
 
+app = create_app()
 client = TestClient(app)
 
 

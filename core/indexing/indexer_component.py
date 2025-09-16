@@ -81,10 +81,10 @@ class Indexer:
         if client is None:
             client = await aget_qdrant_client(self.config)
         
-        # Проверяем наличие коллекции и удаляем её, если force_recreate=True
+        # Проверяем наличие коллекции и удаляем её, если включена перезапись
         try:
             client.get_collection(self.config.collection_name)
-            # Если коллекция существует и force_recreate=True, удаляем её
+            # Если коллекция существует и включена перезапись, удаляем её
             if self.config.force_recreate:
                 client.delete_collection(self.config.collection_name)
         except Exception as e:
@@ -172,12 +172,17 @@ class Indexer:
         """
         if self.index_hybrid and self.sparse_emb:
             logger.info(f"Creating hybrid Qdrant collection '{self.config.collection_name}' with dense and sparse embeddings")
+            # Удаляем существующую коллекцию, если она есть
+            try:
+                self.client.delete_collection(self.config.collection_name)
+            except Exception:
+                pass  # Коллекция не существует или ошибка при удалении
+            
             QdrantVectorStore.from_documents(
                 documents=docs_batch,
                 url=self.config.qdrant_url,
                 collection_name=self.config.collection_name,
                 embedding=dense_embedder if self.index_dense else None,
-                force_recreate=True,
                 vector_name="dense_vector",
                 sparse_embedding=self.sparse_emb if self.index_bm25 or self.index_hybrid else None,
                 sparse_vector_name="sparse_vector" if self.index_bm25 or self.index_hybrid else None,
@@ -186,26 +191,36 @@ class Indexer:
             )
         elif self.index_bm25 and self.sparse_emb and not self.index_dense:
             logger.info(f"Creating sparse-only Qdrant collection '{self.config.collection_name}' using fastembed sparse embeddings")
+            # Удаляем существующую коллекцию, если она есть
+            try:
+                self.client.delete_collection(self.config.collection_name)
+            except Exception:
+                pass  # Коллекция не существует или ошибка при удалении
+            
             QdrantVectorStore.from_documents(
                 documents=docs_batch,
                 url=self.config.qdrant_url,
                 collection_name=self.config.collection_name,
-                embedding=None,
-                force_recreate=True,
-                vector_name=None,
-                sparse_embedding=self.sparse_emb,
-                sparse_vector_name="sparse_vector",
+                embedding=dense_embedder if self.index_dense else None,
+                vector_name="dense_vector",
+                sparse_embedding=self.sparse_emb if self.index_bm25 else None,
+                sparse_vector_name="sparse_vector" if self.index_bm25 else None,
                 retrieval_mode=RetrievalMode.SPARSE,
                 batch_size=self.config.indexing_batch_size,
             )
         elif self.index_dense:
             logger.info(f"Creating dense-only Qdrant collection '{self.config.collection_name}'")
+            # Удаляем существующую коллекцию, если она есть
+            try:
+                self.client.delete_collection(self.config.collection_name)
+            except Exception:
+                pass  # Коллекция не существует или ошибка при удалении
+            
             QdrantVectorStore.from_documents(
                 documents=docs_batch,
                 url=self.config.qdrant_url,
                 collection_name=self.config.collection_name,
                 embedding=dense_embedder,
-                force_recreate=True,
                 vector_name="dense_vector",
                 batch_size=self.config.indexing_batch_size,
             )
@@ -253,33 +268,43 @@ class Indexer:
         try:
             await qdrant_store.aadd_documents(docs_batch)
         except Exception as e:
-            # Если Qdrant жалуется на отсутствие sparse векторов, пробуем пересоздать коллекцию с force_recreate=True
+            # Если Qdrant жалуется на отсутствие sparse векторов, пробуем пересоздать коллекцию
             err_msg = str(e)
             logger.exception(f"Ошибка при добавлении документов в коллекцию: {err_msg}")
             if 'does not contain sparse vectors' in err_msg or 'does not contain sparse' in err_msg:
-                logger.info("Похоже, в коллекции отсутствуют sparse-векторы — пересоздаём коллекцию с force_recreate=True и повторяем добавление")
-                # Пересоздаём коллекцию используя from_documents с force_recreate
+                logger.info("Похоже, в коллекции отсутствуют sparse-векторы — пересоздаём коллекцию и повторяем добавление")
+                # Пересоздаём коллекцию, удалив существующую
                 try:
                     if self.index_hybrid and self.sparse_emb:
+                        # Удаляем существующую коллекцию, если она есть
+                        try:
+                            self.client.delete_collection(self.config.collection_name)
+                        except Exception:
+                            pass  # Коллекция не существует или ошибка при удалении
+                        
                         QdrantVectorStore.from_documents(
                             documents=docs_batch,
                             url=self.config.qdrant_url,
                             collection_name=self.config.collection_name,
                             embedding=dense_embedder if self.index_dense else None,
-                            force_recreate=True,
                             vector_name="dense_vector",
-                            sparse_embedding=self.sparse_emb,
-                            sparse_vector_name="sparse_vector",
+                            sparse_embedding=self.sparse_emb if self.index_bm25 or self.index_hybrid else None,
+                            sparse_vector_name="sparse_vector" if self.index_bm25 or self.index_hybrid else None,
                             retrieval_mode=RetrievalMode.HYBRID,
                             batch_size=self.config.indexing_batch_size,
                         )
                     elif self.index_bm25 and self.sparse_emb and not self.index_dense:
+                        # Удаляем существующую коллекцию, если она есть
+                        try:
+                            self.client.delete_collection(self.config.collection_name)
+                        except Exception:
+                            pass  # Коллекция не существует или ошибка при удалении
+                        
                         QdrantVectorStore.from_documents(
                             documents=docs_batch,
                             url=self.config.qdrant_url,
                             collection_name=self.config.collection_name,
                             embedding=None,
-                            force_recreate=True,
                             vector_name=None,
                             sparse_embedding=self.sparse_emb,
                             sparse_vector_name="sparse_vector",
@@ -287,12 +312,17 @@ class Indexer:
                             batch_size=self.config.indexing_batch_size,
                         )
                     else:
+                        # Удаляем существующую коллекцию, если она есть
+                        try:
+                            self.client.delete_collection(self.config.collection_name)
+                        except Exception:
+                            pass  # Коллекция не существует или ошибка при удалении
+                        
                         QdrantVectorStore.from_documents(
                             documents=docs_batch,
                             url=self.config.qdrant_url,
                             collection_name=self.config.collection_name,
                             embedding=dense_embedder if self.index_dense else None,
-                            force_recreate=True,
                             vector_name="dense_vector",
                             batch_size=self.config.indexing_batch_size,
                         )

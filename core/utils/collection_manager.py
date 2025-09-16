@@ -124,7 +124,8 @@ class CollectionManager:
             recreate: Whether to delete existing collection before creating
             
         Returns:
-            bool: True if collection was created/recreated successfully
+            bool: True if collection was created/recreated successfully, False if collection
+                  already exists and recreate=False
             
         Raises:
             CollectionError: If there's an error creating the collection
@@ -138,6 +139,11 @@ class CollectionManager:
             # Check if collection exists
             collections = self.get_collections(client)
             collection_exists = collection_name in collections
+            
+            # If collection exists and we don't want to recreate, return False
+            if collection_exists and not recreate:
+                logger.info(f"Collection '{collection_name}' already exists and recreate=False")
+                return False
             
             # Delete existing collection if requested
             if collection_exists and recreate:

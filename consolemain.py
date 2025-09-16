@@ -1,7 +1,6 @@
 """Console interface for KAZrag search application."""
 
 import asyncio
-import logging
 import sys
 from pathlib import Path
 
@@ -9,13 +8,16 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
 
 # Import required modules
-from config.logging_config import setup_logging
-from config.settings import Config, load_config
+from config.config_manager import ConfigManager
+from config.logging_config import setup_logging, get_logger, setup_intercept_handler
 from core.qdrant.qdrant_client import get_qdrant_client
 from core.qdrant.qdrant_collections import get_cached_collections
 from core.search.searcher import search_in_collection
 
-logger = logging.getLogger(__name__)
+# Setup logging
+setup_logging()
+setup_intercept_handler()
+logger = get_logger(__name__)
 
 
 def print_results(results, error=None):
@@ -177,7 +179,8 @@ async def main():
         
         # Load configuration
         print("Загрузка конфигурации...")
-        config = load_config()
+        config_manager = ConfigManager.get_instance()
+        config = config_manager.get()
         print("Конфигурация загружена.")
         
         # Initialize Qdrant client

@@ -3,7 +3,7 @@
 import logging
 from typing import Tuple
 
-from config.settings import load_config
+from config.config_manager import ConfigManager
 from core.qdrant_client import get_qdrant_client
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,8 @@ def recreate_collection_from_config(force_recreate: bool = True) -> Tuple[bool, 
         Tuple[bool, str]: (успех, статус)
     """
     try:
-        config = load_config()
+        config_manager = ConfigManager.get_instance()
+        config = config_manager.get()
         
         # Проверка наличия хотя бы одного типа индексации
         if not (config.index_dense or config.index_bm25 or config.index_hybrid):

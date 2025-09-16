@@ -24,9 +24,3 @@ def startup_event_handler() -> None:
         logger.exception(f"Error loading configuration: {e}")
         # Don't exit here, as we want the app to start even if config has issues
         # The app will handle config errors when needed
-
-
-def shutdown_event_handler() -> None:
-    """Logic to execute when the application shuts down."""
-    logger.info("Application shutdown event triggered")
-    # Add any cleanup logic here if needed

@@ -10,6 +10,7 @@ from langchain_core.documents import Document
 from config.settings import load_config
 from core.indexing.chunker import get_text_splitter
 from core.indexing.paragraph_chunker import ParagraphTextSplitter
+from core.indexing.text_splitter import TextSplitter
 
 
 def test_all_chunking_functionality():

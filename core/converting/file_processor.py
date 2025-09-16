@@ -68,15 +68,13 @@ class FileProcessor:
     def scan_directory(
         self, 
         directory: Path, 
-        recursive: bool = True, 
-        file_filter: Optional[str] = None
+        recursive: bool = True
     ) -> Dict[FileType, List[Path]]:
         """Scan directory and identify files by type using pandas DataFrame.
         
         Args:
             directory: Directory to scan
             recursive: Whether to scan subdirectories recursively
-            file_filter: Optional regex pattern to filter filenames
             
         Returns:
             Dict[FileType, List[Path]]: Files grouped by type
@@ -101,11 +99,6 @@ class FileProcessor:
             # Filter only files (not directories)
             files = [f for f in all_files if f.is_file()]
             
-            # Apply file filter if provided
-            if file_filter:
-                pattern = re.compile(file_filter)
-                files = [f for f in files if pattern.match(f.name)]
-                
             # Create DataFrame for efficient processing
             if files:
                 df = pd.DataFrame({
@@ -142,25 +135,8 @@ class FileProcessor:
         except PermissionError:
             raise PermissionError(f"No permission to access directory: {directory}")
         except Exception as e:
-            logger.exception(f"Error scanning directory {directory}: {e}")
-            raise
-
-    def filter_files_by_pattern(self, files: List[Path], pattern: str) -> List[Path]:
-        """Filter files by regex pattern.
-        
-        Args:
-            files: List of file paths
-            pattern: Regex pattern to match
-            
-        Returns:
-            List[Path]: Filtered file paths
-        """
-        try:
-            compiled_pattern = re.compile(pattern)
-            return [f for f in files if compiled_pattern.match(f.name)]
-        except re.error as e:
-            logger.error(f"Invalid regex pattern '{pattern}': {e}")
-            return files  # Return original list if pattern is invalid
+                logger.exception(f"Error scanning directory {directory}: {e}")
+                raise
     
     def process_files(
         self, 

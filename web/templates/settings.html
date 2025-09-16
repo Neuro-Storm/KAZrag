@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <title>Настройки</title>
     <link rel="stylesheet" href="/static/simple.min.css">
+    <!-- Подключаем Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
     <style>
         .status-msg { padding: 1rem; margin-bottom: 1rem; border-radius: 4px; }
         .success { background-color: #d4edda; color: #155724; }
@@ -16,7 +18,7 @@
         .grid-4col { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 1rem; }
         .form-section { border: 1px solid #ccc; border-radius: 4px; padding: 1rem; margin-bottom: 1rem; }
         .form-section h3 { margin-top: 0; }
-        .progress { display: none; padding: 1rem; margin: 1rem 0; background-color: #f0f0f0; border-radius: 4px; }
+        .progress { padding: 1rem; margin: 1rem 0; background-color: #f0f0f0; border-radius: 4px; }
         .spinner { display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 10px; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .collapsible { cursor: pointer; padding: 10px; background-color: #f1f1f1; border: none; text-align: left; outline: none; }
@@ -25,18 +27,17 @@
         .form-info p { margin: 0 0 0.5rem 0; }
         .form-info ul { margin: 0.5rem 0; padding-left: 1.5rem; }
         .help-text { font-size: 0.9em; color: #6c757d; margin: 0.5rem 0 0 0; }
-        #error-message { display: none; color: red; padding: 1rem; background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; margin: 1rem 0; }
-        #success-message { display: none; color: green; padding: 1rem; background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; margin: 1rem 0; }
         
         /* New styles for modular settings */
         .module-tabs { display: flex; flex-wrap: wrap; margin-bottom: 1rem; border-bottom: 1px solid #ccc; }
         .module-tab { padding: 1rem; background-color: #f8f9fa; border: 1px solid #ccc; border-bottom: none; cursor: pointer; margin-right: 0.5rem; border-radius: 4px 4px 0 0; }
         .module-tab.active { background-color: #fff; font-weight: bold; }
         .module-tab:hover:not(.active) { background-color: #e9ecef; }
-        .module-content { display: none; }
-        .module-content.active { display: block; }
         .module-card { border: 1px solid #ccc; border-radius: 4px; padding: 1rem; margin-bottom: 1rem; background-color: #fff; }
         .module-card h3 { margin-top: 0; color: #333; }
+        
+        /* Стили для Alpine.js */
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
@@ -44,23 +45,148 @@
         <h1>Настройки и Управление</h1>
         <nav><a href="/">Поиск</a> <a href="/settings/">Настройки</a></nav>
     </header>
-    <main>
-        {% if status or delete_status %}
-            {% set msg = status or delete_status %}
-            <div class="status-msg {{ 'success' if 'success' in msg or 'saved' in msg or 'indexed' in msg or 'deleted_' in msg or 'pdfs_processed' in msg or 'files_processed' in msg else 'error' if 'error' in msg or 'fail' in msg or 'no_index_type' in msg or 'delete_error' in msg or 'pdf_processing_error' in msg or 'file_processing_error' in msg else 'info' }}">
-                {% if msg == 'saved' %}Настройки сохранены.{% endif %}
-                {% if msg == 'indexed_successfully' %}Индексация успешно завершена!{% endif %}
-                {% if msg == 'indexed_successfully_no_docs' %}Индексация завершена. Не найдено .txt/.md файлов для обработки.{% endif %}
-                {% if 'error' in msg or 'fail' in msg or 'no_index_type' in msg %}Ошибка индексации. Проверьте логи терминала. Сообщение: {{ msg }}{% endif %}
-                {% if 'deleted_' in msg and not 'delete_error' in msg %}Коллекция успешно удалена.{% endif %}
-                {% if 'delete_error' in msg %}Ошибка при удалении коллекции: {{ msg.split('delete_error_')[-1].replace('_', ' ') }}{% endif %}
-                {% if msg == 'error_no_collection_selected' %}Ошибка: Не выбрана коллекция для удаления.{% endif %}
-                {% if 'pdfs_processed_successfully' in msg %}PDF файлы успешно обработаны!{% endif %}
-                {% if 'pdf_processing_error' in msg %}Ошибка при обработке PDF. Проверьте логи терминала. Сообщение: {{ msg }}{% endif %}
-                {% if 'files_processed_successfully' in msg %}Файлы успешно обработаны!{% endif %}
-                {% if 'file_processing_error' in msg %}Ошибка при обработке файлов. Проверьте логи терминала. Сообщение: {{ msg }}{% endif %}
-                {% if msg == 'indexing_started' %}Индексация запущена в фоновом режиме.{% endif %}
-                {% if msg == 'processing_started' %}Обработка запущена в фоновом режиме.{% endif %}
+    <main x-data="{
+        activeTab: (new URLSearchParams(window.location.search)).get('tab') || 'indexing',
+        useMultilevel: {{ 'true' if config.use_multilevel_chunking else 'false' }},
+        chunkingStrategy: '{{ config.chunking_strategy }}',
+        macroStrategy: '{{ config.multilevel_macro_strategy }}',
+        microStrategy: '{{ config.multilevel_micro_strategy }}',
+        // Состояние для управления AJAX запросами
+        isProcessing: false,
+        successMessage: '',
+        errorMessage: '',
+        showSuccessMessage(message) {
+            this.successMessage = message;
+            setTimeout(() => {
+                this.successMessage = '';
+            }, 5000);
+        },
+        showErrorMessage(message) {
+            this.errorMessage = message;
+            setTimeout(() => {
+                this.errorMessage = '';
+            }, 5000);
+        },
+        // Функции для обработки форм
+        async submitSettingsForm(event) {
+            event.preventDefault();
+            const form = event.target;
+            
+            // Получаем модуль из data-атрибута формы
+            const module = form.getAttribute('data-module');
+            
+            // Показываем индикатор прогресса
+            this.isProcessing = true;
+            
+            try {
+                // Собираем данные формы
+                const formData = new FormData(form);
+                
+                // Отправляем данные через fetch
+                const response = await fetch('/api/admin/update-settings', {
+                    method: 'POST',
+                    body: formData,
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                // Обрабатываем ответ
+                if (data.status === 'saved') {
+                    this.showSuccessMessage('Настройки успешно сохранены.');
+                } else if (data.status === 'error') {
+                    this.showErrorMessage(data.message || 'Ошибка сохранения настроек.');
+                } else {
+                    this.showSuccessMessage('Настройки сохранены.');
+                }
+            } catch (error) {
+                console.error('Error saving settings:', error);
+                this.showErrorMessage('Ошибка сохранения настроек: ' + error.message);
+            } finally {
+                // Скрываем индикатор прогресса
+                this.isProcessing = false;
+            }
+        },
+        async runIndexing() {
+            // Показываем индикатор прогресса
+            this.isProcessing = true;
+            
+            try {
+                // Отправляем данные через fetch
+                const response = await fetch('/api/admin/run-indexing', {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                // Обрабатываем ответ
+                if (data.status === 'indexing_started') {
+                    this.showSuccessMessage('Индексация запущена в фоновом режиме.');
+                } else if (data.status === 'error') {
+                    this.showErrorMessage(data.message || 'Ошибка запуска индексации.');
+                } else {
+                    this.showSuccessMessage('Индексация запущена.');
+                }
+            } catch (error) {
+                console.error('Error starting indexing:', error);
+                this.showErrorMessage('Ошибка запуска индексации: ' + error.message);
+            } finally {
+                // Скрываем индикатор прогресса
+                this.isProcessing = false;
+            }
+        },
+        async processFiles() {
+            // Показываем индикатор прогресса
+            this.isProcessing = true;
+            
+            try {
+                // Отправляем данные через fetch
+                const response = await fetch('/api/admin/process-files', {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest'
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const data = await response.json();
+                
+                // Обрабатываем ответ
+                if (data.status === 'processing_started') {
+                    this.showSuccessMessage('Обработка файлов запущена в фоновом режиме.');
+                } else if (data.status === 'error') {
+                    this.showErrorMessage(data.message || 'Ошибка запуска обработки файлов.');
+                } else {
+                    this.showSuccessMessage('Обработка файлов запущена.');
+                }
+            } catch (error) {
+                console.error('Error starting file processing:', error);
+                this.showErrorMessage('Ошибка запуска обработки файлов: ' + error.message);
+            } finally {
+                // Скрываем индикатор прогресса
+                this.isProcessing = false;
+            }
+        }
+    }">
+        {% if status and status_message %}
+            <div class="status-msg {{ status_type }}">
+                {{ status_message }}
             </div>
         {% endif %}
         
@@ -70,22 +196,48 @@
         
         <!-- Module Tabs -->
         <div class="module-tabs">
-            <div class="module-tab active" data-module="indexing">Индексация</div>
-            <div class="module-tab" data-module="conversion">Конвертация</div>
-            <div class="module-tab" data-module="embedding">Эмбеддинг</div>
-            <div class="module-tab" data-module="search">Поиск</div>
-            <div class="module-tab" data-module="qdrant">Qdrant</div>
-            <div class="module-tab" data-module="collections">Коллекции</div>
-            <div class="module-tab" data-module="advanced">Продвинутые</div>
+            <div class="module-tab" 
+                 :class="{ 'active': activeTab === 'indexing' }"
+                 @click="activeTab = 'indexing'"
+                 data-module="indexing">Индексация</div>
+            <div class="module-tab" 
+                 :class="{ 'active': activeTab === 'conversion' }"
+                 @click="activeTab = 'conversion'"
+                 data-module="conversion">Конвертация</div>
+            <div class="module-tab" 
+                 :class="{ 'active': activeTab === 'embedding' }"
+                 @click="activeTab = 'embedding'"
+                 data-module="embedding">Эмбеддинг</div>
+            <div class="module-tab" 
+                 :class="{ 'active': activeTab === 'search' }"
+                 @click="activeTab = 'search'"
+                 data-module="search">Поиск</div>
+            <div class="module-tab" 
+                 :class="{ 'active': activeTab === 'qdrant' }"
+                 @click="activeTab = 'qdrant'"
+                 data-module="qdrant">Qdrant</div>
+            <div class="module-tab" 
+                 :class="{ 'active': activeTab === 'collections' }"
+                 @click="activeTab = 'collections'"
+                 data-module="collections">Коллекции</div>
+            <div class="module-tab" 
+                 :class="{ 'active': activeTab === 'advanced' }"
+                 @click="activeTab = 'advanced'"
+                 data-module="advanced">Продвинутые</div>
+            <div class="module-tab" 
+                 :class="{ 'active': activeTab === 'reranker' }"
+                 @click="activeTab = 'reranker'"
+                 data-module="reranker">Reranker</div>
         </div>
         
         <!-- Indexing Module -->
-        <div id="indexing-module" class="module-content active">
+        <div id="indexing-module" class="module-content" x-show="activeTab === 'indexing'">
             <div class="module-card">
                 <h3>Настройки индексации</h3>
                 
-                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="indexing">
+                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="indexing" @submit="submitSettingsForm">
                     <input type="hidden" name="action" value="save_index_settings">
+                    <input type="hidden" name="active_tab" value="indexing">
                     
                     <label for="folder_path">Папка для индексации (TXT и MD файлы)</label>
                     <input type="text" id="folder_path" name="folder_path" value="{{ config.folder_path }}" required>
@@ -94,12 +246,16 @@
                     <input type="text" id="collection_name" name="collection_name" value="{{ config.collection_name }}" required>
                     
                     <div style="margin-top: 1rem;">
-                        <input type="checkbox" id="use_multilevel_chunking" name="use_multilevel_chunking" value="True" {% if config.use_multilevel_chunking %}checked{% endif %}>
+                        <input type="checkbox" id="use_multilevel_chunking" name="use_multilevel_chunking" value="True" 
+                               x-model="useMultilevel"
+                               {% if config.use_multilevel_chunking %}checked{% endif %}>
                         <label for="use_multilevel_chunking">Использовать многоуровневый чанкинг</label>
                     </div>
                     
                     <!-- Обычный чанкинг (когда многоуровневый не используется) -->
-                    <div id="standard-chunking-settings" style="margin-top: 1rem; padding: 1rem; border: 1px solid #ccc; border-radius: 4px; {% if config.use_multilevel_chunking %}display: none;{% endif %}">
+                    <div id="standard-chunking-settings" 
+                         x-show="!useMultilevel"
+                         style="margin-top: 1rem; padding: 1rem; border: 1px solid #ccc; border-radius: 4px;">
                         <h4>Настройки обычного чанкинга</h4>
                         
                         <div class="grid-2col">
@@ -115,14 +271,19 @@
                         
                         <fieldset style="margin-top: 1rem;">
                             <legend>Стратегия чанкинга</legend>
-                            <input type="radio" id="chunking_character" name="chunking_strategy" value="character" {% if config.chunking_strategy == 'character' %}checked{% endif %}>
+                            <input type="radio" id="chunking_character" name="chunking_strategy" value="character" 
+                                   x-model="chunkingStrategy" {% if config.chunking_strategy == 'character' %}checked{% endif %}>
                             <label for="chunking_character">По символам</label><br>
-                            <input type="radio" id="chunking_paragraph" name="chunking_strategy" value="paragraph" {% if config.chunking_strategy == 'paragraph' %}checked{% endif %}>
+                            <input type="radio" id="chunking_paragraph" name="chunking_strategy" value="paragraph" 
+                                   x-model="chunkingStrategy" {% if config.chunking_strategy == 'paragraph' %}checked{% endif %}>
                             <label for="chunking_paragraph">По абзацам</label><br>
-                            <input type="radio" id="chunking_sentence" name="chunking_strategy" value="sentence" {% if config.chunking_strategy == 'sentence' %}checked{% endif %}>
+                            <input type="radio" id="chunking_sentence" name="chunking_strategy" value="sentence" 
+                                   x-model="chunkingStrategy" {% if config.chunking_strategy == 'sentence' %}checked{% endif %}>
                             <label for="chunking_sentence">По предложениям</label><br>
                             
-                            <div id="paragraph-settings" style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px; {% if config.chunking_strategy != 'paragraph' %}display: none;{% endif %}">
+                            <div id="paragraph-settings" 
+                                 x-show="chunkingStrategy === 'paragraph'"
+                                 style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px;">
                                 <div class="grid-2col">
                                     <div>
                                         <label for="paragraphs_per_chunk">Абзацев в чанке</label>
@@ -135,7 +296,9 @@
                                 </div>
                             </div>
                             
-                            <div id="sentence-settings" style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px; {% if config.chunking_strategy != 'sentence' %}display: none;{% endif %}">
+                            <div id="sentence-settings" 
+                                 x-show="chunkingStrategy === 'sentence'"
+                                 style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px;">
                                 <div class="grid-2col">
                                     <div>
                                         <label for="sentences_per_chunk">Предложений в чанке</label>
@@ -151,19 +314,23 @@
                     </div>
                     
                     <!-- Многоуровневый чанкинг -->
-                    <div id="multilevel-chunking-settings" style="margin-top: 1rem; padding: 1rem; border: 1px solid #ccc; border-radius: 4px; {% if not config.use_multilevel_chunking %}display: none;{% endif %}">
+                    <div id="multilevel-chunking-settings" 
+                         x-show="useMultilevel"
+                         style="margin-top: 1rem; padding: 1rem; border: 1px solid #ccc; border-radius: 4px;">
                         <h4>Настройки многоуровневого чанкинга</h4>
                         
                         <div style="margin-top: 1rem;">
                             <label for="multilevel_macro_strategy">Стратегия макро-чанкинга (основные чанки):</label>
-                            <select id="multilevel_macro_strategy" name="multilevel_macro_strategy">
+                            <select id="multilevel_macro_strategy" name="multilevel_macro_strategy" x-model="macroStrategy">
                                 <option value="character" {% if config.multilevel_macro_strategy == 'character' %}selected{% endif %}>По символам</option>
                                 <option value="paragraph" {% if config.multilevel_macro_strategy == 'paragraph' %}selected{% endif %}>По абзацам</option>
                                 <option value="sentence" {% if config.multilevel_macro_strategy == 'sentence' %}selected{% endif %}>По предложениям</option>
                             </select>
                         </div>
                         
-                        <div id="multilevel-macro-character-settings" style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px; {% if config.multilevel_macro_strategy != 'character' %}display: none;{% endif %}">
+                        <div id="multilevel-macro-character-settings" 
+                             x-show="macroStrategy === 'character'"
+                             style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px;">
                             <div class="grid-2col">
                                 <div>
                                     <label for="multilevel_macro_chunk_size">Размер макро-чанка (символы)</label>
@@ -176,7 +343,9 @@
                             </div>
                         </div>
                         
-                        <div id="multilevel-macro-paragraph-settings" style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px; {% if config.multilevel_macro_strategy != 'paragraph' %}display: none;{% endif %}">
+                        <div id="multilevel-macro-paragraph-settings" 
+                             x-show="macroStrategy === 'paragraph'"
+                             style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px;">
                             <div class="grid-2col">
                                 <div>
                                     <label for="multilevel_macro_paragraphs_per_chunk">Абзацев в макро-чанке</label>
@@ -189,7 +358,9 @@
                             </div>
                         </div>
                         
-                        <div id="multilevel-macro-sentence-settings" style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px; {% if config.multilevel_macro_strategy != 'sentence' %}display: none;{% endif %}">
+                        <div id="multilevel-macro-sentence-settings" 
+                             x-show="macroStrategy === 'sentence'"
+                             style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px;">
                             <div class="grid-2col">
                                 <div>
                                     <label for="multilevel_macro_sentences_per_chunk">Предложений в макро-чанке</label>
@@ -204,14 +375,16 @@
                         
                         <div style="margin-top: 1rem;">
                             <label for="multilevel_micro_strategy">Стратегия микро-чанкинга (дополнительные векторы):</label>
-                            <select id="multilevel_micro_strategy" name="multilevel_micro_strategy">
+                            <select id="multilevel_micro_strategy" name="multilevel_micro_strategy" x-model="microStrategy">
                                 <option value="character" {% if config.multilevel_micro_strategy == 'character' %}selected{% endif %}>По символам</option>
                                 <option value="paragraph" {% if config.multilevel_micro_strategy == 'paragraph' %}selected{% endif %}>По абзацам</option>
                                 <option value="sentence" {% if config.multilevel_micro_strategy == 'sentence' %}selected{% endif %}>По предложениям</option>
                             </select>
                         </div>
                         
-                        <div id="multilevel-micro-character-settings" style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px; {% if config.multilevel_micro_strategy != 'character' %}display: none;{% endif %}">
+                        <div id="multilevel-micro-character-settings" 
+                             x-show="microStrategy === 'character'"
+                             style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px;">
                             <div class="grid-2col">
                                 <div>
                                     <label for="multilevel_micro_chunk_size">Размер микро-чанка (символы)</label>
@@ -224,7 +397,9 @@
                             </div>
                         </div>
                         
-                        <div id="multilevel-micro-paragraph-settings" style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px; {% if config.multilevel_micro_strategy != 'paragraph' %}display: none;{% endif %}">
+                        <div id="multilevel-micro-paragraph-settings" 
+                             x-show="microStrategy === 'paragraph'"
+                             style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px;">
                             <div class="grid-2col">
                                 <div>
                                     <label for="multilevel_micro_paragraphs_per_chunk">Абзацев в микро-чанке</label>
@@ -237,7 +412,9 @@
                             </div>
                         </div>
                         
-                        <div id="multilevel-micro-sentence-settings" style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px; {% if config.multilevel_micro_strategy != 'sentence' %}display: none;{% endif %}">
+                        <div id="multilevel-micro-sentence-settings" 
+                             x-show="microStrategy === 'sentence'"
+                             style="margin-top: 1rem; padding: 1rem; border: 1px solid #eee; border-radius: 4px;">
                             <div class="grid-2col">
                                 <div>
                                     <label for="multilevel_micro_sentences_per_chunk">Предложений в микро-чанке</label>
@@ -251,114 +428,6 @@
                         </div>
                     </div>
                     
-                    <script>
-                        // Показываем/скрываем настройки в зависимости от выбранной стратегии
-                        document.addEventListener('DOMContentLoaded', function() {
-                            const characterRadio = document.getElementById('chunking_character');
-                            const paragraphRadio = document.getElementById('chunking_paragraph');
-                            const sentenceRadio = document.getElementById('chunking_sentence');
-                            const multilevelCheckbox = document.getElementById('use_multilevel_chunking');
-                            const standardChunkingSettings = document.getElementById('standard-chunking-settings');
-                            const multilevelChunkingSettings = document.getElementById('multilevel-chunking-settings');
-                            const paragraphSettings = document.getElementById('paragraph-settings');
-                            const sentenceSettings = document.getElementById('sentence-settings');
-                            const macroStrategySelect = document.getElementById('multilevel_macro_strategy');
-                            const microStrategySelect = document.getElementById('multilevel_micro_strategy');
-                            const macroCharacterSettings = document.getElementById('multilevel-macro-character-settings');
-                            const macroParagraphSettings = document.getElementById('multilevel-macro-paragraph-settings');
-                            const macroSentenceSettings = document.getElementById('multilevel-macro-sentence-settings');
-                            const microCharacterSettings = document.getElementById('multilevel-micro-character-settings');
-                            const microParagraphSettings = document.getElementById('multilevel-micro-paragraph-settings');
-                            const microSentenceSettings = document.getElementById('multilevel-micro-sentence-settings');
-                            
-                            function updateVisibility() {
-                                // Показываем/скрываем настройки обычного или многоуровневого чанкинга
-                                if (multilevelCheckbox && multilevelCheckbox.checked) {
-                                    standardChunkingSettings.style.display = 'none';
-                                    multilevelChunkingSettings.style.display = 'block';
-                                } else {
-                                    standardChunkingSettings.style.display = 'block';
-                                    multilevelChunkingSettings.style.display = 'none';
-                                    
-                                    // Для обычного чанкинга показываем настройки стратегии
-                                    if (paragraphRadio && paragraphRadio.checked) {
-                                        paragraphSettings.style.display = 'block';
-                                    } else if (sentenceRadio && sentenceRadio.checked) {
-                                        sentenceSettings.style.display = 'block';
-                                    } else {
-                                        paragraphSettings.style.display = 'none';
-                                        sentenceSettings.style.display = 'none';
-                                    }
-                                }
-                            }
-                            
-                            function updateMacroStrategyVisibility() {
-                                if (macroStrategySelect) {
-                                    const selectedStrategy = macroStrategySelect.value;
-                                    
-                                    // Скрываем все макро-настройки
-                                    macroCharacterSettings.style.display = 'none';
-                                    macroParagraphSettings.style.display = 'none';
-                                    macroSentenceSettings.style.display = 'none';
-                                    
-                                    // Показываем настройки для выбранной макро-стратегии
-                                    if (selectedStrategy === 'character') {
-                                        macroCharacterSettings.style.display = 'block';
-                                    } else if (selectedStrategy === 'paragraph') {
-                                        macroParagraphSettings.style.display = 'block';
-                                    } else if (selectedStrategy === 'sentence') {
-                                        macroSentenceSettings.style.display = 'block';
-                                    }
-                                }
-                            }
-                            
-                            function updateMicroStrategyVisibility() {
-                                if (microStrategySelect) {
-                                    const selectedStrategy = microStrategySelect.value;
-                                    
-                                    // Скрываем все микро-настройки
-                                    microCharacterSettings.style.display = 'none';
-                                    microParagraphSettings.style.display = 'none';
-                                    microSentenceSettings.style.display = 'none';
-                                    
-                                    // Показываем настройки для выбранной микро-стратегии
-                                    if (selectedStrategy === 'character') {
-                                        microCharacterSettings.style.display = 'block';
-                                    } else if (selectedStrategy === 'paragraph') {
-                                        microParagraphSettings.style.display = 'block';
-                                    } else if (selectedStrategy === 'sentence') {
-                                        microSentenceSettings.style.display = 'block';
-                                    }
-                                }
-                            }
-                            
-                            // Обработчики для переключения между обычным и многоуровневым чанкингом
-                            if (multilevelCheckbox) {
-                                multilevelCheckbox.addEventListener('change', updateVisibility);
-                            }
-                            
-                            // Обработчики для обычного чанкинга
-                            if (characterRadio && paragraphRadio && sentenceRadio) {
-                                characterRadio.addEventListener('change', updateVisibility);
-                                paragraphRadio.addEventListener('change', updateVisibility);
-                                sentenceRadio.addEventListener('change', updateVisibility);
-                            }
-                            
-                            // Обработчики для многоуровневого чанкинга
-                            if (macroStrategySelect) {
-                                macroStrategySelect.addEventListener('change', updateMacroStrategyVisibility);
-                            }
-                            
-                            if (microStrategySelect) {
-                                microStrategySelect.addEventListener('change', updateMicroStrategyVisibility);
-                            }
-                            
-                            // Инициализация при загрузке страницы
-                            updateVisibility();
-                            updateMacroStrategyVisibility();
-                            updateMicroStrategyVisibility();
-                        });
-                    </script>
                     <div class="grid-2col">
                         <div>
                             <label for="embedding_batch_size">Batch size для эмбеддинга (HuggingFace)</label>
@@ -397,8 +466,8 @@
                         <label for="dev_cpu">CPU</label>
                     </fieldset>
                     
-                    <button type="submit">Сохранить настройки индексации</button>
-                    <div class="progress">
+                    <button type="submit" :disabled="isProcessing">Сохранить настройки индексации</button>
+                    <div class="progress" x-show="isProcessing">
                         <span class="spinner"></span> Сохранение настроек индексации...
                     </div>
                 </form>
@@ -407,9 +476,9 @@
             <div class="module-card">
                 <h3>Управление индексом</h3>
                 <p>Проиндексировать данные из <strong>{{ config.folder_path }}</strong> в коллекцию <strong>{{ config.collection_name }}</strong>.</p>
-                <form action="/api/admin/run-indexing" method="post" class="action-form" data-action="run-indexing">
-                    <button type="submit">Запустить индексацию</button>
-                    <div class="progress">
+                <form action="/api/admin/run-indexing" method="post" class="action-form" data-action="run-indexing" @submit.prevent="runIndexing">
+                    <button type="submit" :disabled="isProcessing">Запустить индексацию</button>
+                    <div class="progress" x-show="isProcessing">
                         <span class="spinner"></span> Индексация запущена в фоновом режиме...
                     </div>
                 </form>
@@ -417,13 +486,14 @@
         </div>
         
         <!-- Conversion Module -->
-        <div id="conversion-module" class="module-content">
+        <div id="conversion-module" class="module-content" x-show="activeTab === 'conversion'">
             <div class="module-card">
                 <h3>Настройки обработки PDF (MinerU - Subprocess)</h3>
                 <p><strong>Важно:</strong> Убедитесь, что пакет `mineru` установлен и команда `mineru` доступна в вашем окружении.</p>
                 
-                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="conversion">
+                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="conversion" @submit="submitSettingsForm">
                     <input type="hidden" name="action" value="save_mineru_settings">
+                    <input type="hidden" name="active_tab" value="conversion">
                     
                     <label for="mineru_input_pdf_dir">Папка с PDF файлами для обработки</label>
                     <input type="text" id="mineru_input_pdf_dir" name="mineru_input_pdf_dir" value="{{ config.mineru_input_pdf_dir }}" required>
@@ -488,8 +558,8 @@
                     <label for="mineru_models_dir">Путь к локальным моделям (если выбрано 'Локальные модели')</label>
                     <input type="text" id="mineru_models_dir" name="mineru_models_dir" value="{{ config.mineru_models_dir }}">
 
-                    <button type="submit">Сохранить настройки MinerU</button>
-                    <div class="progress">
+                    <button type="submit" :disabled="isProcessing">Сохранить настройки MinerU</button>
+                    <div class="progress" x-show="isProcessing">
                         <span class="spinner"></span> Сохранение настроек MinerU...
                     </div>
                 </form>
@@ -498,9 +568,9 @@
             <div class="module-card">
                 <h3>Обработка файлов различных форматов</h3>
                 <p>Преобразовать файлы различных форматов из <strong>{{ config.mineru_input_pdf_dir }}</strong> в Markdown и сохранить в <strong>{{ config.mineru_output_md_dir }}</strong>.</p>
-                <form action="/api/admin/process-files" method="post" class="action-form" data-action="process-files">
-                    <button type="submit">Запустить обработку файлов</button>
-                    <div class="progress">
+                <form action="/api/admin/process-files" method="post" class="action-form" data-action="process-files" @submit.prevent="processFiles">
+                    <button type="submit" :disabled="isProcessing">Запустить обработку файлов</button>
+                    <div class="progress" x-show="isProcessing">
                         <span class="spinner"></span> Обработка файлов запущена в фоновом режиме...
                     </div>
                 </form>
@@ -508,12 +578,13 @@
         </div>
         
         <!-- Embedding Module -->
-        <div id="embedding-module" class="module-content">
+        <div id="embedding-module" class="module-content" x-show="activeTab === 'embedding'">
             <div class="module-card">
                 <h3>Настройки эмбеддинга</h3>
                 
-                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="embedding">
+                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="embedding" @submit="submitSettingsForm">
                     <input type="hidden" name="action" value="save_advanced_settings">
+                    <input type="hidden" name="active_tab" value="embedding">
                     
                     <label for="hf_model">Модель для плотных векторов (семантика)</label>
                     <input list="model-history-dense" id="hf_model" name="hf_model" value="{{ config.current_hf_model }}" required>
@@ -541,8 +612,8 @@
                         </p>
                     </div>
                     
-                    <button type="submit">Сохранить настройки эмбеддинга</button>
-                    <div class="progress">
+                    <button type="submit" :disabled="isProcessing">Сохранить настройки эмбеддинга</button>
+                    <div class="progress" x-show="isProcessing">
                         <span class="spinner"></span> Сохранение настроек эмбеддинга...
                     </div>
                 </form>
@@ -550,18 +621,19 @@
         </div>
         
         <!-- Search Module -->
-        <div id="search-module" class="module-content">
+        <div id="search-module" class="module-content" x-show="activeTab === 'search'">
             <div class="module-card">
                 <h3>Настройки поиска</h3>
                 
-                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="search">
+                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="search" @submit="submitSettingsForm">
                     <input type="hidden" name="action" value="save_advanced_settings">
+                    <input type="hidden" name="active_tab" value="search">
                     
                     <label for="search_default_k">Количество результатов поиска по умолчанию</label>
                     <input type="number" id="search_default_k" name="search_default_k" value="{{ config.search_default_k }}" min="1" required>
                     
-                    <button type="submit">Сохранить настройки поиска</button>
-                    <div class="progress">
+                    <button type="submit" :disabled="isProcessing">Сохранить настройки поиска</button>
+                    <div class="progress" x-show="isProcessing">
                         <span class="spinner"></span> Сохранение настроек поиска...
                     </div>
                 </form>
@@ -569,12 +641,13 @@
         </div>
         
         <!-- Qdrant Module -->
-        <div id="qdrant-module" class="module-content">
+        <div id="qdrant-module" class="module-content" x-show="activeTab === 'qdrant'">
             <div class="module-card">
                 <h3>Настройки подключения к Qdrant</h3>
                 
-                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="qdrant">
+                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="qdrant" @submit="submitSettingsForm">
                     <input type="hidden" name="action" value="save_advanced_settings">
+                    <input type="hidden" name="active_tab" value="qdrant">
                     
                     <label for="qdrant_url">URL Qdrant</label>
                     <input type="text" id="qdrant_url" name="qdrant_url" value="{{ config.qdrant_url }}" required>
@@ -599,7 +672,7 @@
         </div>
         
         <!-- Collections Module -->
-        <div id="collections-module" class="module-content">
+        <div id="collections-module" class="module-content" x-show="activeTab === 'collections'">
             <div class="module-card">
                 <h3>Управление коллекциями</h3>
                 
@@ -612,8 +685,8 @@
                             {% endfor %}
                         </select>
                     </label>
-                    <button type="submit" onclick="return confirm('Вы уверены, что хотите удалить выбранную коллекцию? Это действие необратимо.');">Удалить</button>
-                    <div class="progress">
+                    <button type="submit" onclick="return confirm('Вы уверены, что хотите удалить выбранную коллекцию? Это действие необратимо.');" :disabled="isProcessing">Удалить</button>
+                    <div class="progress" x-show="isProcessing">
                         <span class="spinner"></span> Удаление коллекции...
                     </div>
                 </form>
@@ -621,11 +694,11 @@
         </div>
         
         <!-- Advanced Module -->
-        <div id="advanced-module" class="module-content">
+        <div id="advanced-module" class="module-content" x-show="activeTab === 'advanced'">
             <div class="module-card">
                 <h3>Настройки кэширования</h3>
                 
-                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="advanced">
+                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="advanced" @submit="submitSettingsForm">
                     <input type="hidden" name="action" value="save_advanced_settings">
                     
                     <div class="grid-3col">
@@ -643,8 +716,8 @@
                         </div>
                     </div>
                     
-                    <button type="submit">Сохранить настройки кэширования</button>
-                    <div class="progress">
+                    <button type="submit" :disabled="isProcessing">Сохранить настройки кэширования</button>
+                    <div class="progress" x-show="isProcessing">
                         <span class="spinner"></span> Сохранение настроек кэширования...
                     </div>
                 </form>
@@ -653,8 +726,9 @@
             <div class="module-card">
                 <h3>Настройки GGUF моделей</h3>
                 
-                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="advanced">
+                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="advanced" @submit="submitSettingsForm">
                     <input type="hidden" name="action" value="save_advanced_settings">
+                    <input type="hidden" name="active_tab" value="advanced">
                     
                     <label for="gguf_model_n_ctx">Размер контекста для GGUF моделей</label>
                     <input type="number" id="gguf_model_n_ctx" name="gguf_model_n_ctx" value="{{ config.gguf_model_n_ctx }}" min="1" required>
@@ -669,8 +743,9 @@
             <div class="module-card">
                 <h3>Настройки индексации документов</h3>
                 
-                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="advanced">
+                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="advanced" @submit="submitSettingsForm">
                     <input type="hidden" name="action" value="save_advanced_settings">
+                    <input type="hidden" name="active_tab" value="advanced">
                     
                     <div class="grid-2col">
                         <div>
@@ -683,24 +758,24 @@
                         </div>
                     </div>
                     
-                    <button type="submit">Сохранить настройки индексации документов</button>
-                    <div class="progress">
+                    <button type="submit" :disabled="isProcessing">Сохранить настройки индексации документов</button>
+                    <div class="progress" x-show="isProcessing">
                         <span class="spinner"></span> Сохранение настроек индексации документов...
                     </div>
                 </form>
             </div>
             
-            <div class="module-card">
-                <h3>Настройки MinerU (дополнительные)</h3>
+            <h3>Настройки MinerU (дополнительные)</h3>
                 
-                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="advanced">
+                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="advanced" @submit="submitSettingsForm">
                     <input type="hidden" name="action" value="save_advanced_settings">
+                    <input type="hidden" name="active_tab" value="advanced">
                     
                     <label for="mineru_subprocess_timeout">Таймаут subprocess вызова mineru (сек)</label>
                     <input type="number" id="mineru_subprocess_timeout" name="mineru_subprocess_timeout" value="{{ config.mineru_subprocess_timeout }}" min="1" required>
                     
-                    <button type="submit">Сохранить дополнительные настройки MinerU</button>
-                    <div class="progress">
+                    <button type="submit" :disabled="isProcessing">Сохранить дополнительные настройки MinerU</button>
+                    <div class="progress" x-show="isProcessing">
                         <span class="spinner"></span> Сохранение дополнительных настроек MinerU...
                     </div>
                 </form>
@@ -713,234 +788,55 @@
                     <p><strong>Переменные окружения:</strong> Некоторые настройки задаются через переменные окружения в файле <code>.env</code>:</p>
                     <ul>
                         <li><code>ADMIN_API_KEY</code> - API ключ для защиты админки</li>
+                        <li><code>HUGGINGFACE_TOKEN</code> - Токен HuggingFace для приватных моделей</li>
                         <li><code>FASTEMBED_CACHE_DIR</code> - Директория кэша моделей BM25 (по умолчанию <code>./models/fastembed_cache</code>)</li>
                     </ul>
                 </div>
             </div>
         </div>
-    </main>
-    
-    <script>
-        // Module switching functionality
-        document.querySelectorAll('.module-tab').forEach(tab => {
-            tab.addEventListener('click', () => {
-                // Remove active class from all tabs and content
-                document.querySelectorAll('.module-tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('.module-content').forEach(c => c.classList.remove('active'));
+        
+        <!-- Reranker Module -->
+        <div id="reranker-module" class="module-content" x-show="activeTab === 'reranker'">
+            <div class="module-card">
+                <h3>Настройки Reranker</h3>
                 
-                // Add active class to clicked tab
-                tab.classList.add('active');
-                
-                // Show corresponding content
-                const module = tab.getAttribute('data-module');
-                document.getElementById(`${module}-module`).classList.add('active');
-            });
-        });
-        
-        // Функция для выполнения AJAX POST запроса
-        async function ajaxPost(url, data) {
-            const formData = new FormData();
-            for (const key in data) {
-                if (data.hasOwnProperty(key)) {
-                    formData.append(key, data[key]);
-                }
-            }
-            
-            // Проверяем, что URL корректный
-            if (!url || typeof url !== 'string') {
-                throw new Error('Invalid URL provided');
-            }
-            
-            const response = await fetch(url, {
-                method: 'POST',
-                body: formData,
-                headers: {
-                    'X-Requested-With': 'XMLHttpRequest'
-                }
-            });
-            
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            
-            const contentType = response.headers.get('content-type');
-            if (contentType && contentType.includes('application/json')) {
-                return await response.json();
-            } else {
-                return await response.text();
-            }
-        }
-        
-        // Функция для отображения сообщения об ошибке
-        function showErrorMessage(message) {
-            const errorContainer = document.getElementById('error-message');
-            if (errorContainer) {
-                errorContainer.textContent = message;
-                errorContainer.style.display = 'block';
-            }
-        }
-        
-        // Функция для скрытия сообщения об ошибке
-        function hideErrorMessage() {
-            const errorContainer = document.getElementById('error-message');
-            if (errorContainer) {
-                errorContainer.style.display = 'none';
-            }
-        }
-        
-        // Функция для отображения сообщения об успехе
-        function showSuccessMessage(message) {
-            const successContainer = document.getElementById('success-message');
-            if (successContainer) {
-                successContainer.textContent = message;
-                successContainer.style.display = 'block';
-            }
-        }
-        
-        // Функция для скрытия сообщения об успехе
-        function hideSuccessMessage() {
-            const successContainer = document.getElementById('success-message');
-            if (successContainer) {
-                successContainer.style.display = 'none';
-            }
-        }
-        
-        // Функция для отображения индикатора загрузки
-        function showLoadingIndicator(formElement) {
-            const progress = formElement.querySelector('.progress');
-            if (progress) {
-                progress.style.display = 'block';
-            }
-        }
-        
-        // Функция для скрытия индикатора загрузки
-        function hideLoadingIndicator(formElement) {
-            const progress = formElement.querySelector('.progress');
-            if (progress) {
-                progress.style.display = 'none';
-            }
-        }
-        
-        // Обработчики событий для форм с индикаторами прогресса
-        function handleFormSubmit(event) {
-            event.preventDefault();
-            
-            const form = event.target;
-            
-            // Скрываем сообщения
-            hideErrorMessage();
-            hideSuccessMessage();
-            
-            // Отображаем индикатор загрузки
-            showLoadingIndicator(form);
-            
-            // Блокируем кнопку отправки
-            const submitButton = form.querySelector('button[type="submit"]');
-            if (submitButton) {
-                submitButton.disabled = true;
-            }
-            
-            // Собираем данные формы
-            const formData = new FormData(form);
-            const action = formData.get('action');
-            
-            // Получаем URL из атрибута action формы, с проверкой на корректность
-            let formAction = form.getAttribute('action');
-            if (!formAction || typeof formAction !== 'string') {
-                formAction = '/api/admin/update-settings'; // URL по умолчанию
-            }
-            
-            // Отправляем данные
-            ajaxPost(formAction, Object.fromEntries(formData))
-                .then(response => {
-                    if (response.status === 'saved') {
-                        showSuccessMessage('Настройки успешно сохранены.');
-                    } else if (response.status === 'indexing_started') {
-                        showSuccessMessage('Индексация запущена в фоновом режиме.');
-                    } else if (response.status === 'processing_started') {
-                        showSuccessMessage('Обработка запущена в фоновом режиме.');
-                    } else if (response.status && response.status.includes('deleted_')) {
-                        showSuccessMessage('Коллекция успешно удалена.');
-                        // Обновляем страницу для обновления списка коллекций
-                        location.reload();
-                    } else if (response.status === 'delete_error') {
-                        showErrorMessage('Ошибка при удалении коллекции.');
-                    } else if (response.status === 'error_no_collection_selected') {
-                        showErrorMessage('Не выбрана коллекция для удаления.');
-                    } else {
-                        showErrorMessage('Ошибка при сохранении настроек.');
-                    }
-                })
-                .catch(error => {
-                    console.error('Ошибка при отправке формы:', error);
-                    showErrorMessage('Произошла ошибка. Пожалуйста, попробуйте еще раз.');
-                })
-                .finally(() => {
-                    // Скрываем индикатор загрузки
-                    hideLoadingIndicator(form);
+                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="reranker" @submit="submitSettingsForm">
+                    <input type="hidden" name="action" value="save_advanced_settings">
+                    <input type="hidden" name="active_tab" value="reranker">
                     
-                    // Разблокируем кнопку отправки
-                    if (submitButton) {
-                        submitButton.disabled = false;
-                    }
-                });
-        }
-        
-        // Простой обработчик для чекбокса index_hybrid
-        function setupIndexHybridHandler() {
-            try {
-                var checkbox = document.getElementById('index_hybrid');
-                if (checkbox) {
-                    checkbox.addEventListener('change', function() {
-                        if (this.checked) {
-                            document.getElementById('index_dense').checked = true;
-                        }
-                    });
-                }
-            } catch (e) {
-                console.log("Error setting up index_hybrid handler:", e);
-            }
-        }
-        
-        // Инициализация обработчиков после загрузки DOM
-        document.addEventListener('DOMContentLoaded', function() {
-            setupIndexHybridHandler();
-            
-            // Добавляем обработчики для всех форм настроек
-            document.querySelectorAll('.settings-form').forEach(form => {
-                form.addEventListener('submit', handleFormSubmit);
-            });
-            
-            // Добавляем обработчики для всех форм действий
-            document.querySelectorAll('.action-form').forEach(form => {
-                form.addEventListener('submit', handleFormSubmit);
-            });
-            
-            // Обработчики событий для радиокнопок индексации
-            document.getElementById('indexing_dense').addEventListener('change', function() {
-                if (this.checked) {
-                    document.getElementById('index_dense').value = 'True';
-                    document.getElementById('index_bm25').value = 'False';
-                    document.getElementById('index_hybrid').value = 'False';
-                }
-            });
-            
-            document.getElementById('indexing_sparse').addEventListener('change', function() {
-                if (this.checked) {
-                    document.getElementById('index_dense').value = 'False';
-                    document.getElementById('index_bm25').value = 'True';
-                    document.getElementById('index_hybrid').value = 'False';
-                }
-            });
-            
-            document.getElementById('indexing_hybrid').addEventListener('change', function() {
-                if (this.checked) {
-                    document.getElementById('index_dense').value = 'True';
-                    document.getElementById('index_bm25').value = 'True';  // Гибрид подразумевает sparse
-                    document.getElementById('index_hybrid').value = 'True';
-                }
-            });
-        });
-    </script>
+                    <div style="margin-bottom: 1rem;">
+                        <input type="checkbox" id="reranker_enabled" name="reranker_enabled" value="True" 
+                               {% if config.reranker_enabled %}checked{% endif %}>
+                        <label for="reranker_enabled">Включить reranker</label>
+                    </div>
+                    
+                    <label for="reranker_model">Модель reranker</label>
+                    <input type="text" id="reranker_model" name="reranker_model" value="{{ config.reranker_model }}" required>
+                    
+                    <label for="reranker_top_k">Количество результатов после reranking</label>
+                    <input type="number" id="reranker_top_k" name="reranker_top_k" value="{{ config.reranker_top_k }}" min="1" required>
+                    
+                    <div class="form-info">
+                        <p><strong>Поддерживаемые модели:</strong></p>
+                        <ul>
+                            <li><code>cross-encoder/ms-marco-MiniLM-L-6-v2</code> - Быстрая и эффективная модель</li>
+                            <li><code>cross-encoder/ms-marco-TinyBERT-L-6</code> - Более компактная модель</li>
+                            <li><code>models/reranker_model.gguf</code> - Локальная модель в формате GGUF</li>
+                        </ul>
+                        <p class="help-text">
+                            Модели загружаются автоматически при первом использовании и кэшируются локально. 
+                            Локальные модели должны быть в формате GGUF и доступны по указанному пути.
+                        </p>
+                    </div>
+                    
+                    <button type="submit" :disabled="isProcessing">Сохранить настройки reranker</button>
+                    <div class="progress" x-show="isProcessing">
+                        <span class="spinner"></span> Сохранение настроек reranker...
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    </main>
 </body>
 </html>

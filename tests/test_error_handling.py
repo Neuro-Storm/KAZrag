@@ -13,7 +13,7 @@ import logging
 
 from fastapi import FastAPI
 
-from core.exception_handlers import add_exception_handlers
+from core.utils.exception_handlers import add_exception_handlers
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)

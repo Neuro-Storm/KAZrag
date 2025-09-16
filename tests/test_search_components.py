@@ -92,6 +92,28 @@ class TestCollectionAnalyzer:
         assert has_sparse is False
         assert sparse_vector_name == "sparse_vector"
 
+    def test_analyze_collection_with_custom_sparse_name(self):
+        """Test analyzing collection with custom sparse vector name."""
+        analyzer = CollectionAnalyzer()
+        
+        # Create mock collection info with custom sparse vector name
+        mock_collection_info = Mock()
+        mock_config = Mock()
+        mock_params = Mock()
+        mock_params.vectors = {"size": 768}
+        mock_params.sparse_vectors = {"custom_sparse": {}}
+        mock_config.params = mock_params
+        mock_collection_info.config = mock_config
+        
+        mock_client = Mock()
+        mock_client.get_collection.return_value = mock_collection_info
+        
+        has_dense, has_sparse, sparse_vector_name = analyzer.analyze_collection(mock_client, "test-collection")
+        
+        assert has_dense is True
+        assert has_sparse is True
+        assert sparse_vector_name == "custom_sparse"
+
 
 class TestSearchStrategy:
     """Test suite for SearchStrategy class."""
@@ -161,7 +183,7 @@ class TestSearchStrategy:
         strategy.has_sparse = True
         strategy.sparse_vector_name = "sparse_vector"
         
-        with patch('core.search_strategy.QdrantVectorStore') as mock_qdrant_store:
+        with patch('core.search.search_strategy.QdrantVectorStore') as mock_qdrant_store:
             mock_instance = Mock()
             mock_qdrant_store.return_value = mock_instance
             
@@ -180,7 +202,7 @@ class TestSearchStrategy:
         strategy.has_sparse = True
         strategy.sparse_vector_name = "sparse_vector"
         
-        with patch('core.search_strategy.QdrantVectorStore') as mock_qdrant_store:
+        with patch('core.search.search_strategy.QdrantVectorStore') as mock_qdrant_store:
             mock_instance = Mock()
             mock_qdrant_store.return_value = mock_instance
             
@@ -197,12 +219,45 @@ class TestSearchStrategy:
         strategy.has_dense = True
         strategy.has_sparse = False
         
-        with patch('core.search_strategy.QdrantVectorStore') as mock_qdrant_store:
+        with patch('core.search.search_strategy.QdrantVectorStore') as mock_qdrant_store:
             mock_instance = Mock()
             mock_qdrant_store.return_value = mock_instance
             
             qdrant_store = strategy.create_qdrant_store("dense")
             assert qdrant_store is mock_instance
+
+    def test_create_qdrant_store_invalid_mode(self):
+        """Test creating QdrantVectorStore with invalid search mode."""
+        mock_client = Mock()
+        mock_embedder = Mock()
+        mock_sparse_emb = Mock()
+        
+        strategy = SearchStrategy(mock_client, "test-collection", mock_embedder, mock_sparse_emb)
+        strategy.has_dense = True
+        strategy.has_sparse = True
+        strategy.sparse_vector_name = "sparse_vector"
+        
+        with patch('core.search.search_strategy.QdrantVectorStore') as mock_qdrant_store:
+            mock_instance = Mock()
+            mock_qdrant_store.return_value = mock_instance
+            
+            # Should default to dense search for invalid mode
+            qdrant_store = strategy.create_qdrant_store("invalid_mode")
+            assert qdrant_store is mock_instance
+
+    def test_determine_search_mode_no_vectors(self):
+        """Test determining search mode when no vectors are available."""
+        mock_client = Mock()
+        mock_embedder = Mock()
+        mock_sparse_emb = Mock()
+        
+        strategy = SearchStrategy(mock_client, "test-collection", mock_embedder, mock_sparse_emb)
+        strategy.has_dense = False
+        strategy.has_sparse = False
+        
+        mode = strategy.determine_search_mode(hybrid=False)
+        # Should default to dense search
+        assert mode == "dense"
 
 
 class TestSearchExecutor:
@@ -276,3 +331,42 @@ class TestSearchExecutor:
         assert results == []
         assert error is not None
         assert "Search failed" in error
+
+    @pytest.mark.asyncio
+    async def test_execute_search_empty_results(self):
+        """Test executing search that returns empty results."""
+        executor = SearchExecutor()
+        
+        mock_qdrant = Mock()
+        # Create a proper async mock that returns empty results
+        async def mock_search(*args, **kwargs):
+            return []
+        mock_qdrant.asimilarity_search_with_score = mock_search
+        
+        results, error = await executor.execute_search(
+            qdrant=mock_qdrant,
+            query="test query",
+            k=5
+        )
+        
+        assert results == []
+        assert error is None
+
+    @pytest.mark.parametrize("search_mode", ["dense", "sparse", "hybrid"])
+    def test_search_strategy_parametrized(self, search_mode):
+        """Parametrized test for search strategy with different modes."""
+        mock_client = Mock()
+        mock_embedder = Mock()
+        mock_sparse_emb = Mock()
+        
+        strategy = SearchStrategy(mock_client, "test-collection", mock_embedder, mock_sparse_emb)
+        strategy.has_dense = True
+        strategy.has_sparse = True
+        strategy.sparse_vector_name = "sparse_vector"
+        
+        with patch('core.search.search_strategy.QdrantVectorStore') as mock_qdrant_store:
+            mock_instance = Mock()
+            mock_qdrant_store.return_value = mock_instance
+            
+            qdrant_store = strategy.create_qdrant_store(search_mode)
+            assert qdrant_store is mock_instance

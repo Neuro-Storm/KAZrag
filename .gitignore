@@ -40,6 +40,9 @@ coverage.xml
 *.cover
 .hypothesis/
 
+# Test directories
+tests/
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
@@ -92,6 +95,7 @@ IMPLEMENTATION_PLAN.md
 pdfs_to_process/
 data_to_index/
 data_to_index1/
+evaluation_results/
 
 # Source code collection script and its output
 collect_source_code.py

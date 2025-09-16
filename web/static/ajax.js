@@ -32,13 +32,14 @@ async function ajaxPost(url, data) {
 }
 
 // Функция для поиска документов
-async function searchDocuments(query, collection, searchDevice, k, searchType, filters) {
+async function searchDocuments(query, collection, searchDevice, k, searchType, useReranker, filters) {
     const data = {
         query: query,
         collection: collection,
         search_device: searchDevice,
         k: k,
         search_type: searchType,
+        use_reranker: useReranker ? 'True' : 'False',
         filter_author: filters.author || '',
         filter_source: filters.source || '',
         filter_file_extension: filters.fileExtension || '',
@@ -112,6 +113,10 @@ async function handleSearchSubmit(event) {
     const searchDevice = document.getElementById('search_device').value;
     const searchType = document.querySelector('input[name="search_type"]:checked').value;
     
+    // Получаем значение переключателя reranker (если элемент существует)
+    const rerankerCheckbox = document.getElementById('use_reranker');
+    const useReranker = rerankerCheckbox ? rerankerCheckbox.checked : true;
+    
     // Получаем значения фильтров
     const filters = {
         author: document.getElementById('filter_author').value,
@@ -126,7 +131,7 @@ async function handleSearchSubmit(event) {
     
     try {
         // Выполняем поиск
-        const response = await searchDocuments(query, collection, searchDevice, k, searchType, filters);
+        const response = await searchDocuments(query, collection, searchDevice, k, searchType, useReranker, filters);
         
         // Обновляем результаты поиска
         updateSearchResults(response);

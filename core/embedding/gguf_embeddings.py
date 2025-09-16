@@ -6,7 +6,8 @@ from typing import List
 
 from langchain_core.embeddings import Embeddings
 
-from config.settings import Config, load_config
+from config.config_manager import ConfigManager
+from config.settings import Config
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,8 @@ class GGUFEmbeddings(Embeddings):
             from llama_cpp import Llama
             
             # Загружаем конфигурацию для получения параметров
-            config = load_config()
+            config_manager = ConfigManager.get_instance()
+            config = config_manager.get()
             
             # Проверяем, существует ли файл модели
             if not os.path.exists(model_path):
