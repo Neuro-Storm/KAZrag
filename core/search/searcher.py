@@ -10,6 +10,7 @@ from core.qdrant.qdrant_client import aget_qdrant_client
 from core.search.collection_analyzer import CollectionAnalyzer
 from core.search.search_executor import SearchExecutor
 from core.search.search_strategy import SearchStrategy
+from core.search.query_cache import QueryCache
 
 logger = logging.getLogger(__name__)
 
@@ -83,9 +84,94 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         # Создаем QdrantVectorStore с соответствующими параметрами
         qdrant = strategy.create_qdrant_store(search_mode)
         
-        # Выполняем поиск
-        executor = SearchExecutor()
-        results, error = await executor.execute_search(qdrant, query, k, metadata_filter)
+        # Инициализируем кэш запросов
+        query_cache = QueryCache(client, config)
+        
+        # Получаем размерность вектора для текущей модели
+        # Для получения размерности создаем тестовый эмбеддинг
+        test_embedding = embedder.embed_query("test")
+        vector_size = len(test_embedding)
+        
+        # Получаем или создаем эмбеддинг запроса с использованием кэша
+        query_vector = query_cache.get_or_create_query_embedding(query, collection_name, vector_size)
+        
+        # Выполняем поиск с использованием кэшированного вектора
+        # Так как мы используем готовый вектор, нам нужно выполнить поиск напрямую через клиент Qdrant
+        try:
+            # Создаем фильтр по метаданным, если он задан
+            search_filter = None
+            if metadata_filter:
+                from qdrant_client.http.models import FieldCondition, Filter, MatchValue, Range
+                must_conditions = []
+                
+                for key, value in metadata_filter.items():
+                    # Обрабатываем различные типы условий
+                    if isinstance(value, dict):
+                        # Сложные условия (например, {"$gt": 2020})
+                        for op, op_value in value.items():
+                            if op == "$gt":
+                                must_conditions.append(FieldCondition(
+                                    key=f"metadata.{key}",
+                                    range=Range(gt=op_value)
+                                ))
+                            elif op == "$gte":
+                                must_conditions.append(FieldCondition(
+                                    key=f"metadata.{key}",
+                                    range=Range(gte=op_value)
+                                ))
+                            elif op == "$lt":
+                                must_conditions.append(FieldCondition(
+                                    key=f"metadata.{key}",
+                                    range=Range(lt=op_value)
+                                ))
+                            elif op == "$lte":
+                                must_conditions.append(FieldCondition(
+                                    key=f"metadata.{key}",
+                                    range=Range(lte=op_value)
+                                ))
+                            elif op == "$contains":
+                                # Для массивов или строк
+                                must_conditions.append(FieldCondition(
+                                    key=f"metadata.{key}",
+                                    match=MatchValue(value=op_value)
+                                ))
+                    else:
+                        # Простое равенство
+                        must_conditions.append(FieldCondition(
+                            key=f"metadata.{key}",
+                            match=MatchValue(value=value)
+                        ))
+                
+                search_filter = Filter(must=must_conditions)
+            
+            # Выполняем поиск по вектору напрямую через клиент Qdrant
+            search_results = client.search(
+                collection_name=collection_name,
+                query_vector=query_vector,
+                limit=k,
+                query_filter=search_filter,
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            # Преобразуем результаты в формат, ожидаемый остальной частью кода
+            results = []
+            for point in search_results:
+                # Создаем объект, похожий на документ Langchain
+                class DocumentLike:
+                    def __init__(self, payload):
+                        self.payload = payload
+                        self.metadata = payload.get('metadata', {})
+                        self.page_content = payload.get('content', '') or payload.get('page_content', '')
+                
+                doc = DocumentLike(point.payload)
+                results.append((doc, point.score))
+            
+            error = None
+        except Exception as e:
+            logger.exception(f"Ошибка при поиске с вектором: {e}")
+            results = []
+            error = str(e)
         
         # Дополнительно обрабатываем результаты для веб-интерфейса
         processed_results = []

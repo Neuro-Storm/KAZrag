@@ -114,10 +114,11 @@ class EmbeddingManager:
             model_kwargs = {"device": device}
             encode_kwargs = {"batch_size": batch_size}
             # Если используем CUDA, указываем dtype через encode_kwargs для поддерживающих моделей
+            # Убираем torch_dtype для моделей, которые его не поддерживают
             if device == "cuda":
                 # Добавляем torch_dtype только для моделей, которые это поддерживают
                 # Проверяем по названию модели или по другим критериям
-                unsupported_models = ["qwen", "qwen3"]
+                unsupported_models = ["qwen", "qwen3", "google/mt5-base", "t5", "mt5"]
                 model_lower = model_name.lower()
                 
                 # Если модель не в списке неподдерживающих, добавляем torch_dtype
