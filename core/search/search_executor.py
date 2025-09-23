@@ -183,7 +183,9 @@ class SearchExecutor:
                 
                 sparse_results = client.search(
                     collection_name=collection_name,
-                    query_vector=(sparse_vector_name, sparse_vector),
+                    query_vector=None,  # Для sparse поиска query_vector=None
+                    sparse_vector=sparse_vector,  # {indices: [...], values: [...]}
+                    vector_name=sparse_vector_name,  # Имя sparse named vector
                     limit=k * 2,
                     query_filter=search_filter,
                     with_payload=True,
@@ -339,9 +341,19 @@ class SearchExecutor:
                     # Sparse поиск
                     # Для sparse векторов используем именованный sparse вектор
                     sparse_vector_name = sparse_params["sparse_vector_name"] if sparse_params else "sparse_vector"
+                    # Получаем sparse вектор через sparse embedding
+                    sparse_embedding = sparse_params.get("sparse_embedding")
+                    sparse_vector = None
+                    if sparse_embedding:
+                        # Адаптируем под SparseEmbeddingAdapter API
+                        sparse_result = sparse_embedding.embed_query(query)
+                        sparse_vector = {"indices": sparse_result.indices, "values": sparse_result.values}
+                    
                     results = client.search(
                         collection_name=config.collection_name,
-                        query_vector=(sparse_vector_name, []),  # Пустой sparse вектор для sparse поиска
+                        query_vector=None,  # Для sparse поиска query_vector=None
+                        sparse_vector=sparse_vector,  # {indices: [...], values: [...]}
+                        vector_name=sparse_vector_name,  # Имя sparse named vector
                         limit=k,
                         query_filter=search_filter,
                         with_payload=True,
@@ -381,9 +393,19 @@ class SearchExecutor:
                     # Sparse поиск
                     # Для sparse векторов используем именованный sparse вектор
                     sparse_vector_name = sparse_params["sparse_vector_name"] if sparse_params else "sparse_vector"
+                    # Получаем sparse вектор через sparse embedding
+                    sparse_embedding = sparse_params.get("sparse_embedding")
+                    sparse_vector = None
+                    if sparse_embedding:
+                        # Адаптируем под SparseEmbeddingAdapter API
+                        sparse_result = sparse_embedding.embed_query(query)
+                        sparse_vector = {"indices": sparse_result.indices, "values": sparse_result.values}
+                    
                     results = client.search(
                         collection_name=config.collection_name,
-                        query_vector=(sparse_vector_name, []),  # Пустой sparse вектор для sparse поиска
+                        query_vector=None,  # Для sparse поиска query_vector=None
+                        sparse_vector=sparse_vector,  # {indices: [...], values: [...]}
+                        vector_name=sparse_vector_name,  # Имя sparse named vector
                         limit=k,
                         with_payload=True,
                         with_vectors=False
