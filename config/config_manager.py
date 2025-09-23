@@ -176,6 +176,11 @@ class ConfigManager:
             config_dict = current_config.model_dump()
             config_dict.update(updates)
             
+            # Validate new BM25 fields
+            if 'use_bm25' in updates:
+                config.use_bm25 = updates['use_bm25']
+                config.sparse_vector_name = updates.get('sparse_vector_name', config.sparse_vector_name)
+            
             # Create new config object
             updated_config = Config(**config_dict)
             

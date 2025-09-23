@@ -105,6 +105,12 @@ class Config(BaseSettings):
     search_default_k: int = Field(default=5, ge=1)  # Минимум 1 результат
     use_hybrid: bool = False  # Использовать гибридный поиск (dense + sparse)
     
+    # BM25 Native Sparse Configuration
+    use_bm25: bool = True  # Enable native BM25 via sparse vectors with IDF
+    sparse_vector_name: str = "bm25_text"  # Name of the sparse vector field
+    bm25_tokenizer: str = "word"  # Tokenizer type: word, whitespace, prefix
+    bm25_min_token_len: int = 2
+    
     # Настройки reranker
     reranker_enabled: bool = False
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"

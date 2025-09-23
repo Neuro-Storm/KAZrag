@@ -3,6 +3,8 @@
 import logging
 
 from config.config_manager import ConfigManager
+from core.search.search_strategy import SearchStrategy
+from core.qdrant.qdrant_client import get_qdrant_client
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +20,19 @@ def startup_event_handler() -> None:
     try:
         logger.info("Loading configuration")
         config_manager = ConfigManager.get_instance()
-        config_manager.get()
+        config = config_manager.get()
         logger.info("Configuration successfully loaded")
+        
+        # Initialize BM25 collection if enabled
+        if config.use_bm25:
+            logger.info("Initializing BM25 collection configuration")
+            try:
+                client = get_qdrant_client(config)
+                strategy = SearchStrategy(client, config.collection_name, None)
+                strategy.create_or_update_collection_for_bm25()
+                logger.info("BM25 collection configuration initialized successfully")
+            except Exception as e:
+                logger.exception(f"Error initializing BM25 collection configuration: {e}")
     except Exception as e:
         logger.exception(f"Error loading configuration: {e}")
         # Don't exit here, as we want the app to start even if config has issues

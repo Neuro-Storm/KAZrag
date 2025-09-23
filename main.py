@@ -26,13 +26,6 @@ hf_token = os.getenv("HUGGINGFACE_TOKEN")
 if hf_token:
     os.environ["HF_TOKEN"] = hf_token
 
-# Проверяем и создаем директорию для кэша моделей fastembed, если она задана
-fastembed_cache_dir = os.environ.get('FASTEMBED_CACHE_DIR')
-if fastembed_cache_dir:
-    fastembed_cache_path = Path(fastembed_cache_dir)
-    fastembed_cache_path.mkdir(parents=True, exist_ok=True)
-    logger.info(f"FastEmbed cache directory: {fastembed_cache_path.absolute()}")
-
 # Создание основного приложения FastAPI через фабрику
 app = create_app()
 

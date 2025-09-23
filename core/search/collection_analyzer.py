@@ -12,20 +12,21 @@ class CollectionAnalyzer:
     """Класс для анализа коллекций Qdrant."""
     
     @staticmethod
-    def analyze_collection(client: QdrantClient, collection_name: str) -> Tuple[bool, bool, str]:
+    def analyze_collection(client: QdrantClient, collection_name: str, sparse_name: str = None) -> Tuple[bool, bool, str]:
         """
         Анализирует коллекцию Qdrant для определения типов векторов.
         
         Args:
             client (QdrantClient): Клиент Qdrant.
             collection_name (str): Название коллекции.
+            sparse_name (str, optional): Имя sparse вектора. По умолчанию None.
             
         Returns:
             Tuple[bool, bool, str]: (has_dense, has_sparse, sparse_vector_name)
         """
         has_dense = False
         has_sparse = False
-        sparse_vector_name = "sparse_vector"
+        sparse_vector_name = sparse_name or "sparse_vector"
         
         try:
             coll_info = client.get_collection(collection_name)
@@ -63,26 +64,26 @@ class CollectionAnalyzer:
                         if sparse_vector_names:
                             sparse_vector_name = sparse_vector_names[0]  # Берем первое имя
                         else:
-                            sparse_vector_name = "sparse_vector"
+                            sparse_vector_name = sparse_name or "sparse_vector"
                     else:
-                        sparse_vector_name = "sparse_vector"
+                        sparse_vector_name = sparse_name or "sparse_vector"
                         
                     logger.debug(f"Analysis result: has_dense={has_dense}, has_sparse={has_sparse}, sparse_vector_name={sparse_vector_name}")
                 else:
                     # По умолчанию предполагаем, что есть dense векторы
                     has_dense = True
-                    sparse_vector_name = "sparse_vector"
+                    sparse_vector_name = sparse_name or "sparse_vector"
                     logger.debug("Using default values: has_dense=True, has_sparse=False")
             else:
                 # По умолчанию предполагаем, что есть dense векторы
                 has_dense = True
-                sparse_vector_name = "sparse_vector"
+                sparse_vector_name = sparse_name or "sparse_vector"
                 logger.debug("Using default values: has_dense=True, has_sparse=False")
         except Exception as e:
             logger.debug(f"Не удалось получить информацию о коллекции '{collection_name}': {e}")
             # По умолчанию предполагаем, что есть dense векторы (старое поведение)
             has_dense = True
-            sparse_vector_name = "sparse_vector"
+            sparse_vector_name = sparse_name or "sparse_vector"
             logger.debug("Using default values due to error: has_dense=True, has_sparse=False")
             
         return has_dense, has_sparse, sparse_vector_name

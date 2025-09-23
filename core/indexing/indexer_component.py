@@ -46,15 +46,16 @@ class Indexer:
         
         # Инициализация sparse embedding если нужно
         self.sparse_emb = None
-        if self.index_bm25 or self.index_hybrid:
+        if config.use_bm25 and (self.index_bm25 or self.index_hybrid):
             try:
-                self.sparse_emb = SparseEmbeddingAdapter(config.sparse_embedding)
-                logger.info(f"Sparse embedding adapter initialized: model={config.sparse_embedding}, type={type(self.sparse_emb)}")
+                from core.embedding.sparse_embedding_adapter import SparseEmbeddingAdapter
+                self.sparse_emb = SparseEmbeddingAdapter(config)
+                logger.info(f"Native BM25 sparse embedding adapter initialized")
             except ImportError:
-                logger.warning("fastembed недоступен: индексация BM25/hybrid будет пропущена либо выполнится только dense часть.")
+                logger.warning("Не удалось инициализировать native BM25: индексация BM25/hybrid будет пропущена либо выполнится только dense часть.")
                 self.sparse_emb = None
             except Exception as e:
-                logger.exception(f"Ошибка при инициализации sparse embedding adapter ({config.sparse_embedding}): {e}")
+                logger.exception(f"Ошибка при инициализации native BM25 sparse embedding adapter: {e}")
                 self.sparse_emb = None
 
     async def index_documents(
@@ -120,20 +121,6 @@ class Indexer:
                     logger.exception(f"Ошибка при обработке партии документов: {e}")
                     raise IndexingError(f"Ошибка при обработке партии документов: {e}")
         
-        # Обрабатываем оставшиеся документы в последней партии
-        if docs_batch:
-            try:
-                await self._process_batch(
-                    docs_batch, 
-                    dense_embedder, 
-                    client, 
-                    collection_created,
-                    folder_path_resolved
-                )
-            except Exception as e:
-                logger.exception(f"Ошибка при обработке последней партии документов: {e}")
-                raise IndexingError(f"Ошибка при обработке последней партии документов: {e}")
-        
         return True, "indexed_successfully"
 
     async def _process_batch(
@@ -184,13 +171,13 @@ class Indexer:
                 collection_name=self.config.collection_name,
                 embedding=dense_embedder if self.index_dense else None,
                 vector_name="dense_vector",
-                sparse_embedding=self.sparse_emb if self.index_bm25 or self.index_hybrid else None,
-                sparse_vector_name="sparse_vector" if self.index_bm25 or self.index_hybrid else None,
+                sparse_embedding=self.sparse_emb if (self.config.use_bm25 and (self.index_bm25 or self.index_hybrid)) else None,
+                sparse_vector_name=self.config.sparse_vector_name if (self.config.use_bm25 and (self.index_bm25 or self.index_hybrid)) else "sparse_vector",
                 retrieval_mode=RetrievalMode.HYBRID,
                 batch_size=self.config.indexing_batch_size,
             )
         elif self.index_bm25 and self.sparse_emb and not self.index_dense:
-            logger.info(f"Creating sparse-only Qdrant collection '{self.config.collection_name}' using fastembed sparse embeddings")
+            logger.info(f"Creating sparse-only Qdrant collection '{self.config.collection_name}' using native BM25 sparse embeddings")
             # Удаляем существующую коллекцию, если она есть
             try:
                 self.client.delete_collection(self.config.collection_name)
@@ -203,8 +190,8 @@ class Indexer:
                 collection_name=self.config.collection_name,
                 embedding=dense_embedder if self.index_dense else None,
                 vector_name="dense_vector",
-                sparse_embedding=self.sparse_emb if self.index_bm25 else None,
-                sparse_vector_name="sparse_vector" if self.index_bm25 else None,
+                sparse_embedding=self.sparse_emb if (self.config.use_bm25 and self.index_bm25) else None,
+                sparse_vector_name=self.config.sparse_vector_name if (self.config.use_bm25 and self.index_bm25) else "sparse_vector",
                 retrieval_mode=RetrievalMode.SPARSE,
                 batch_size=self.config.indexing_batch_size,
             )
@@ -244,8 +231,8 @@ class Indexer:
                 collection_name=self.config.collection_name,
                 embedding=dense_embedder if self.index_dense else None,
                 vector_name="dense_vector",
-                sparse_embedding=self.sparse_emb,
-                sparse_vector_name="sparse_vector",
+                sparse_embedding=self.sparse_emb if (self.config.use_bm25 and (self.index_bm25 or self.index_hybrid)) else None,
+                sparse_vector_name=self.config.sparse_vector_name if (self.config.use_bm25 and (self.index_bm25 or self.index_hybrid)) else "sparse_vector",
                 retrieval_mode=RetrievalMode.HYBRID
             )
         elif self.index_bm25 and self.sparse_emb and not self.index_dense:
@@ -254,8 +241,8 @@ class Indexer:
                 collection_name=self.config.collection_name,
                 embedding=None,
                 vector_name=None,
-                sparse_embedding=self.sparse_emb,
-                sparse_vector_name="sparse_vector",
+                sparse_embedding=self.sparse_emb if (self.config.use_bm25 and self.index_bm25) else None,
+                sparse_vector_name=self.config.sparse_vector_name if (self.config.use_bm25 and self.index_bm25) else "sparse_vector",
                 retrieval_mode=RetrievalMode.SPARSE
             )
         else:
@@ -288,8 +275,8 @@ class Indexer:
                             collection_name=self.config.collection_name,
                             embedding=dense_embedder if self.index_dense else None,
                             vector_name="dense_vector",
-                            sparse_embedding=self.sparse_emb if self.index_bm25 or self.index_hybrid else None,
-                            sparse_vector_name="sparse_vector" if self.index_bm25 or self.index_hybrid else None,
+                            sparse_embedding=self.sparse_emb if (self.config.use_bm25 and (self.index_bm25 or self.index_hybrid)) else None,
+                            sparse_vector_name=self.config.sparse_vector_name if (self.config.use_bm25 and (self.index_bm25 or self.index_hybrid)) else "sparse_vector",
                             retrieval_mode=RetrievalMode.HYBRID,
                             batch_size=self.config.indexing_batch_size,
                         )
@@ -306,8 +293,8 @@ class Indexer:
                             collection_name=self.config.collection_name,
                             embedding=None,
                             vector_name=None,
-                            sparse_embedding=self.sparse_emb,
-                            sparse_vector_name="sparse_vector",
+                            sparse_embedding=self.sparse_emb if (self.config.use_bm25 and self.index_bm25) else None,
+                            sparse_vector_name=self.config.sparse_vector_name if (self.config.use_bm25 and self.index_bm25) else "sparse_vector",
                             retrieval_mode=RetrievalMode.SPARSE,
                             batch_size=self.config.indexing_batch_size,
                         )

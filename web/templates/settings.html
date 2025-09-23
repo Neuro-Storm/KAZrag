@@ -597,6 +597,29 @@
                     <label for="sparse_embedding">Модель для sparse embedding</label>
                     <input type="text" id="sparse_embedding" name="sparse_embedding" value="{{ config.sparse_embedding }}" required>
                     
+                    <div style="margin-top: 1rem;">
+                        <input type="checkbox" id="use_bm25" name="use_bm25" value="True" 
+                               {% if config.use_bm25 %}checked{% endif %}>
+                        <label for="use_bm25">Включить native BM25 (IDF modifier)</label>
+                    </div>
+                    
+                    <div class="grid-2col" style="margin-top: 1rem;">
+                        <div>
+                            <label for="sparse_vector_name">Имя sparse вектора</label>
+                            <input type="text" id="sparse_vector_name" name="sparse_vector_name" value="{{ config.sparse_vector_name }}">
+                        </div>
+                        <div>
+                            <label for="bm25_tokenizer">Токенизатор BM25</label>
+                            <select id="bm25_tokenizer" name="bm25_tokenizer">
+                                <option value="word" {% if config.bm25_tokenizer == 'word' %}selected{% endif %}>Word</option>
+                                <option value="whitespace" {% if config.bm25_tokenizer == 'whitespace' %}selected{% endif %}>Whitespace</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <label for="bm25_min_token_len">Минимальная длина токена для BM25</label>
+                    <input type="number" id="bm25_min_token_len" name="bm25_min_token_len" value="{{ config.bm25_min_token_len }}" min="1" required>
+                    
                     <div class="form-info">
                         <p><strong>Директория кэша моделей sparse embedding:</strong> 
                            <span id="fastembed_cache_dir_display">

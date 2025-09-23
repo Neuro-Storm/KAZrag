@@ -5,6 +5,7 @@ import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 
 from qdrant_client.http.models import FieldCondition, Filter, MatchValue, Range
+from qdrant_client.models import SparseVector
 
 from core.search.reranker_manager import RerankerManager
 from config.config_manager import ConfigManager
@@ -149,20 +150,28 @@ class SearchExecutor:
             return [], str(e)
 
     @staticmethod
-    async def execute_hybrid_search(client, query: str, embedder, sparse_emb, k: int, metadata_filter: Optional[Dict[str, Any]] = None):
-        """Выполняет гибридный поиск (dense + sparse)."""
+    async def execute_hybrid_search(client, query: str, embedder, sparse_params: Dict, k: int, metadata_filter: Optional[Dict[str, Any]] = None):
+        """Выполняет гибридный поиск (dense + sparse BM25)."""
         try:
-            # Получаем dense vector
+            config = ConfigManager.get_instance().get()
+            # Dense vector
             dense_vector = embedder.embed_query(query)
             
             # Получаем sparse vector, если доступен
             sparse_vector = None
-            if sparse_emb:
-                # Адаптируем под SparseEmbeddingAdapter API
-                sparse_result = sparse_emb.embed_query(query)
-                sparse_vector = {"indices": sparse_result.indices, "values": sparse_result.values}
+            sparse_name = None
+            if sparse_params and sparse_params.get("sparse_embedding"):
+                sparse_emb = sparse_params["sparse_embedding"]
+                sparse_vector = sparse_emb.embed_query(query)  # Now SparseVector from native adapter
+                # Ensure it's dict for Qdrant (if needed)
+                if isinstance(sparse_vector, SparseVector):
+                    sparse_dict = {"indices": sparse_vector.indices, "values": sparse_vector.values}
+                else:
+                    sparse_dict = sparse_vector
+                
+                sparse_name = sparse_params.get("sparse_vector_name", config.sparse_vector_name)
             
-            collection_name = ConfigManager.get_instance().get().collection_name
+            collection_name = config.collection_name
             search_filter = SearchExecutor._create_filter(metadata_filter) if metadata_filter else None
             
             # Выполняем dense поиск с именованным вектором
@@ -170,22 +179,19 @@ class SearchExecutor:
                 collection_name=collection_name,
                 query_vector=("dense_vector", dense_vector),
                 limit=k * 2,  # Берем больше для reranking
+                query_filter=search_filter,
                 with_payload=True,
                 with_vectors=False
             )
             
             # Выполняем sparse поиск
             sparse_results = []
-            if sparse_vector:
-                sparse_vector_name = "sparse_vector"  # Имя sparse вектора по умолчанию
-                if sparse_params and "sparse_vector_name" in sparse_params:
-                    sparse_vector_name = sparse_params["sparse_vector_name"]
-                
+            if sparse_vector and sparse_name:
                 sparse_results = client.search(
                     collection_name=collection_name,
-                    query_vector=None,  # Для sparse поиска query_vector=None
-                    sparse_vector=sparse_vector,  # {indices: [...], values: [...]}
-                    vector_name=sparse_vector_name,  # Имя sparse named vector
+                    query_vector=None,
+                    sparse_vector={sparse_name: sparse_dict},
+                    vector_name=sparse_name,  # Use named sparse
                     limit=k * 2,
                     query_filter=search_filter,
                     with_payload=True,
@@ -340,25 +346,32 @@ class SearchExecutor:
                 elif search_mode == "sparse":
                     # Sparse поиск
                     # Для sparse векторов используем именованный sparse вектор
-                    sparse_vector_name = sparse_params["sparse_vector_name"] if sparse_params else "sparse_vector"
+                    sparse_vector_name = sparse_params["sparse_vector_name"] if sparse_params else config.sparse_vector_name
                     # Получаем sparse вектор через sparse embedding
                     sparse_embedding = sparse_params.get("sparse_embedding")
                     sparse_vector = None
                     if sparse_embedding:
                         # Адаптируем под SparseEmbeddingAdapter API
                         sparse_result = sparse_embedding.embed_query(query)
-                        sparse_vector = {"indices": sparse_result.indices, "values": sparse_result.values}
+                        if isinstance(sparse_result, SparseVector):
+                            sparse_vector = {"indices": sparse_result.indices, "values": sparse_result.values}
+                        else:
+                            sparse_vector = {"indices": sparse_result.indices, "values": sparse_result.values}
                     
-                    results = client.search(
-                        collection_name=config.collection_name,
-                        query_vector=None,  # Для sparse поиска query_vector=None
-                        sparse_vector=sparse_vector,  # {indices: [...], values: [...]}
-                        vector_name=sparse_vector_name,  # Имя sparse named vector
-                        limit=k,
-                        query_filter=search_filter,
-                        with_payload=True,
-                        with_vectors=False
-                    )
+                    if sparse_vector:
+                        results = client.search(
+                            collection_name=config.collection_name,
+                            query_vector=None,  # Для sparse поиска query_vector=None
+                            sparse_vector={sparse_vector_name: sparse_vector},  # {indices: [...], values: [...]}
+                            vector_name=sparse_vector_name,  # Имя sparse named vector
+                            limit=k,
+                            query_filter=search_filter,
+                            with_payload=True,
+                            with_vectors=False
+                        )
+                    else:
+                        # Если sparse вектор не создан, возвращаем пустой результат
+                        results = []
                 else:
                     # Dense
                     # Для dense векторов используем именованный вектор
@@ -392,24 +405,31 @@ class SearchExecutor:
                 elif search_mode == "sparse":
                     # Sparse поиск
                     # Для sparse векторов используем именованный sparse вектор
-                    sparse_vector_name = sparse_params["sparse_vector_name"] if sparse_params else "sparse_vector"
+                    sparse_vector_name = sparse_params["sparse_vector_name"] if sparse_params else config.sparse_vector_name
                     # Получаем sparse вектор через sparse embedding
                     sparse_embedding = sparse_params.get("sparse_embedding")
                     sparse_vector = None
                     if sparse_embedding:
                         # Адаптируем под SparseEmbeddingAdapter API
                         sparse_result = sparse_embedding.embed_query(query)
-                        sparse_vector = {"indices": sparse_result.indices, "values": sparse_result.values}
+                        if isinstance(sparse_result, SparseVector):
+                            sparse_vector = {"indices": sparse_result.indices, "values": sparse_result.values}
+                        else:
+                            sparse_vector = {"indices": sparse_result.indices, "values": sparse_result.values}
                     
-                    results = client.search(
-                        collection_name=config.collection_name,
-                        query_vector=None,  # Для sparse поиска query_vector=None
-                        sparse_vector=sparse_vector,  # {indices: [...], values: [...]}
-                        vector_name=sparse_vector_name,  # Имя sparse named vector
-                        limit=k,
-                        with_payload=True,
-                        with_vectors=False
-                    )
+                    if sparse_vector:
+                        results = client.search(
+                            collection_name=config.collection_name,
+                            query_vector=None,  # Для sparse поиска query_vector=None
+                            sparse_vector={sparse_vector_name: sparse_vector},  # {indices: [...], values: [...]}
+                            vector_name=sparse_vector_name,  # Имя sparse named vector
+                            limit=k,
+                            with_payload=True,
+                            with_vectors=False
+                        )
+                    else:
+                        # Если sparse вектор не создан, возвращаем пустой результат
+                        results = []
                 else:
                     # Dense
                     # Для dense векторов используем именованный вектор

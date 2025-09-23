@@ -1,5 +1,0 @@
-﻿--START--
-git status -s
-?? git_push_alt_log.txt
-?? git_push_log.txt
---ADDING--

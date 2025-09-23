@@ -1,60 +1,57 @@
-"""Адаптер для SparseTextEmbedding из fastembed для обеспечения совместимости с langchain-qdrant."""
+"""Адаптер для разреженных эмбеддингов с native BM25."""
 
-from typing import List
+import logging
+from collections import Counter
+from typing import Dict, List, Tuple
 
-from fastembed import SparseTextEmbedding
+from qdrant_client.models import SparseVector
+from config.config_manager import ConfigManager
 
-
-class SparseVector:
-    """Класс для представления sparse вектора с атрибутами values и indices."""
-    
-    def __init__(self, indices: List[int], values: List[float]):
-        """Инициализация sparse вектора.
-        
-        Args:
-            indices: Список индексов ненулевых значений
-            values: Список соответствующих значений
-        """
-        self.indices = indices
-        self.values = values
+logger = logging.getLogger(__name__)
 
 
 class SparseEmbeddingAdapter:
-    """Адаптер для SparseTextEmbedding, предоставляющий метод embed_documents."""
+    """Адаптер для sparse эмбеддингов, заменяющий Fastembed на native BM25."""
     
-    def __init__(self, model_name: str):
-        """Инициализация адаптера.
-        
-        Args:
-            model_name: Название модели для SparseTextEmbedding
+    def __init__(self, config=None):
+        """Инициализирует адаптер."""
+        self.config = config or ConfigManager.get_instance().get()
+        if not self.config.use_bm25:
+            raise ValueError("BM25 not enabled in config")
+
+    def encode(self, texts: List[str], return_sparse: bool = True) -> List[SparseVector]:
         """
-        self.sparse_embedding = SparseTextEmbedding(model_name=model_name)
-        self.model_name = model_name
-    
-    def embed_documents(self, texts: List[str]) -> List[SparseVector]:
-        """Генерация sparse эмбеддингов для списка документов.
+        Генерирует sparse vectors для текстов (native BM25-like: токены + TF weights).
         
         Args:
-            texts: Список текстов для обработки
+            texts: List of texts.
+            return_sparse: Always True for sparse.
             
         Returns:
-            Список sparse векторов
+            List of SparseVector (indices: token hashes, values: TF).
         """
-        # Используем метод embed вместо embed_documents
-        embeddings = list(self.sparse_embedding.embed(texts))
-        # Преобразуем sparse эмбеддинги в формат, совместимый с langchain-qdrant
-        # Возвращаем объекты SparseVector с атрибутами values и indices
-        return [SparseVector(emb.indices.tolist(), emb.values.tolist()) for emb in embeddings]
-    
-    def embed_query(self, text: str) -> SparseVector:
-        """Генерация sparse эмбеддинга для одного запроса.
-        
-        Args:
-            text: Текст запроса
+        sparse_vectors = []
+        for text in texts:
+            # Simple tokenization (adapt to config.bm25_tokenizer)
+            tokens = text.lower().split()  # Word tokenizer
+            tokens = [t for t in tokens if len(t) >= self.config.bm25_min_token_len]
             
-        Returns:
-            Sparse вектор запроса
-        """
-        # Используем метод embed для одного текста
-        embedding = list(self.sparse_embedding.embed([text]))[0]
-        return SparseVector(embedding.indices.tolist(), embedding.values.tolist())
+            # TF weights (frequency)
+            token_counts = Counter(tokens)
+            total_terms = len(tokens)
+            indices = [hash(token) for token in token_counts.keys()]  # Use hash for indices (positive ints)
+            values = [count / total_terms for count in token_counts.values()]  # Normalized TF
+            
+            # Ensure indices are unique and sorted (Qdrant requirement)
+            indexed = sorted(zip(indices, values))
+            indices = [idx for idx, _ in indexed]
+            values = [val for _, val in indexed]
+            
+            sparse_vectors.append(SparseVector(indices=indices, values=values))
+        
+        logger.debug(f"Generated {len(sparse_vectors)} sparse vectors for BM25")
+        return sparse_vectors
+
+    def embed_query(self, query: str) -> SparseVector:
+        """Single query embedding."""
+        return self.encode([query], return_sparse=True)[0]

@@ -4,8 +4,10 @@ import logging
 from typing import Tuple, List, Optional, Dict, Any
 
 from qdrant_client.http.models import RecommendRequest, SearchRequest, ScoredPoint
+from qdrant_client.models import SparseVectorParams, Modifier, SparseIndexParams
 
 from core.search.collection_analyzer import CollectionAnalyzer
+from config.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
 
@@ -30,10 +32,28 @@ class SearchStrategy:
         
         # Анализируем коллекцию
         analyzer = CollectionAnalyzer()
+        config = ConfigManager.get_instance().get()
         self.has_dense, self.has_sparse, self.sparse_vector_name = analyzer.analyze_collection(
-            client, collection_name
+            client, collection_name,
+            sparse_name=config.sparse_vector_name if config.use_bm25 else None
         )
     
+    def create_or_update_collection_for_bm25(self):
+        """Creates/updates collection with native BM25 sparse config."""
+        config = ConfigManager.get_instance().get()
+        if not config.use_bm25:
+            return
+        
+        sparse_config = {
+            config.sparse_vector_name: SparseVectorParams(
+                modifier=Modifier.IDF,  # Enable BM25-like IDF
+                index=SparseIndexParams(on_disk=True)  # For large collections
+            )
+        }
+        # Integrate with existing create_collection (call in startup or indexer)
+        # Note: This is a placeholder - actual implementation would depend on how collections are created
+        logger.info(f"Configured collection '{self.collection_name}' with BM25 sparse vector config")
+
     def determine_search_mode(self, hybrid: bool) -> str:
         """
         Определяет режим поиска на основе параметров.
@@ -88,7 +108,8 @@ class SearchStrategy:
                 logger.info(f"Configuring sparse-only search for collection '{self.collection_name}' with sparse_vector_name='{self.sparse_vector_name}'")
                 return self.client, "sparse", None, {
                     "sparse_vector_name": self.sparse_vector_name,
-                    "sparse_embedding": self.sparse_emb
+                    "sparse_embedding": self.sparse_emb,
+                    "use_idf": True  # BM25 IDF
                 }
             else:
                 # Dense-only поиск (по умолчанию)

@@ -51,16 +51,16 @@ class MultiLevelIndexer:
         
         # Инициализация sparse embedding если нужно
         self.sparse_emb = None
-        if getattr(config, 'index_bm25', False) or getattr(config, 'index_hybrid', False):
+        if getattr(config, 'use_bm25', False) and (getattr(config, 'index_bm25', False) or getattr(config, 'index_hybrid', False)):
             if SPARSE_AVAILABLE:
                 try:
-                    self.sparse_emb = SparseEmbeddingAdapter(config.sparse_embedding)
-                    logger.info(f"Sparse embedding adapter initialized: model={config.sparse_embedding}")
+                    self.sparse_emb = SparseEmbeddingAdapter(config)
+                    logger.info(f"Sparse embedding adapter initialized with native BM25")
                 except Exception as e:
-                    logger.exception(f"Ошибка при инициализации sparse embedding adapter ({config.sparse_embedding}): {e}")
+                    logger.exception(f"Ошибка при инициализации native sparse embedding adapter: {e}")
                     self.sparse_emb = None
             else:
-                logger.warning("fastembed недоступен: sparse embedding будет пропущен.")
+                logger.warning("Native BM25 sparse embedding недоступен: sparse embedding будет пропущен.")
         
         # Создаем многоуровневый чанкер
         self.multilevel_chunker = self._create_multilevel_chunker()
@@ -106,7 +106,11 @@ class MultiLevelIndexer:
             # Sparse векторы (если нужны)
             sparse_vectors_config = {}
             if index_sparse:
-                sparse_vectors_config["sparse_vector"] = SparseVectorParams()
+                from qdrant_client.models import SparseVectorParams, Modifier, SparseIndexParams
+                sparse_vectors_config[getattr(self.config, 'sparse_vector_name', 'sparse_vector')] = SparseVectorParams(
+                    modifier=Modifier.IDF,  # Enable BM25-like IDF
+                    index=SparseIndexParams(on_disk=True)  # For large collections
+                )
             
             logger.debug(f"Vectors config: {vectors_config}")
             logger.debug(f"Sparse vectors config: {sparse_vectors_config}")
@@ -243,9 +247,9 @@ class MultiLevelIndexer:
                 # Добавляем dense векторы (мультивекторы)
                 point_vector["dense_vector"] = dense_vectors
                 
+            # Добавляем sparse векторы в основной вектор, если они есть
             if index_sparse and sparse_vector:
-                # Добавляем sparse векторы если они нужны
-                point_vector["sparse_vector"] = sparse_vector
+                point_vector[getattr(self.config, 'sparse_vector_name', 'sparse_vector')] = sparse_vector
             
             # Создаем точку для Qdrant с автоматически сгенерированным UUID
             point = PointStruct(
@@ -332,7 +336,7 @@ class MultiLevelIndexer:
             # Для гибридного поиска передаем оба вектора
             search_vector = {
                 "dense_vector": dense_query_vector,
-                "sparse_vector": sparse_vector
+                getattr(self.config, 'sparse_vector_name', 'sparse_vector'): sparse_vector
             }
             logger.info("Using hybrid search mode")
         elif index_dense:
@@ -347,7 +351,7 @@ class MultiLevelIndexer:
                 "indices": sparse_vector_obj.indices.tolist() if hasattr(sparse_vector_obj.indices, 'tolist') else list(sparse_vector_obj.indices),
                 "values": sparse_vector_obj.values.tolist() if hasattr(sparse_vector_obj.values, 'tolist') else list(sparse_vector_obj.values)
             }
-            search_vector = {"sparse_vector": sparse_vector}
+            search_vector = {getattr(self.config, 'sparse_vector_name', 'sparse_vector'): sparse_vector}
             logger.info("Using sparse search mode")
         else:
             logger.warning("No valid search mode determined")
@@ -357,11 +361,91 @@ class MultiLevelIndexer:
         
         # Выполняем поиск в Qdrant с именованным вектором
         collection_name = getattr(self.config, 'collection_name', DEFAULT_COLLECTION_NAME)
-        search_results = self.client.search(
-            collection_name=collection_name,
-            query_vector=("dense_vector", search_vector),
-            limit=k
-        )
+        
+        # Для гибридного поиска используем метод query_points или раздельный подход
+        if index_hybrid and index_dense and use_sparse:
+            # Гибридный поиск - выполним отдельные поиски и объединим результаты
+            logger.info("Выполнение гибридного поиска")
+            
+            # Dense поиск
+            dense_results = self.client.search(
+                collection_name=collection_name,
+                query_vector=("dense_vector", dense_query_vector),
+                limit=k * 2,  # Берем больше для reranking
+                query_filter=search_filter,
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            # Sparse поиск
+            sparse_results = self.client.search(
+                collection_name=collection_name,
+                query_vector=None,  # Для sparse поиска query_vector=None
+                sparse_vector={getattr(self.config, 'sparse_vector_name', 'sparse_vector'): sparse_vector},  # {indices: [...], values: [...]}
+                vector_name=getattr(self.config, 'sparse_vector_name', 'sparse_vector'),  # Имя sparse named vector
+                limit=k * 2,
+                query_filter=search_filter,
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            # Объединяем результаты (простое объединение с reranking)
+            # Создаем словарь для объединения результатов по ID
+            combined_dict = {}
+            
+            # Добавляем dense результаты (с коэффициентом alpha)
+            alpha = 0.7  # Вес для dense результатов (повышенный вес для семантики)
+            for result in dense_results:
+                result_id = result.id
+                combined_dict[result_id] = {
+                    'point': result,
+                    'score': alpha * result.score
+                }
+            
+            # Добавляем sparse результаты (с коэффициентом 1-alpha)
+            beta = 1 - alpha
+            for result in sparse_results:
+                result_id = result.id
+                if result_id in combined_dict:
+                    # Если результат уже есть, добавляем к существующему скору
+                    combined_dict[result_id]['score'] += beta * result.score
+                else:
+                    # Если результат новый, добавляем его
+                    combined_dict[result_id] = {
+                        'point': result,
+                        'score': beta * result.score
+                    }
+            
+            # Сортируем по объединенному скору и берем top-k
+            sorted_results = sorted(combined_dict.items(), key=lambda x: x[1]['score'], reverse=True)[:k]
+            
+            # Возвращаем только объекты PointStruct
+            search_results = [item[1]['point'] for item in sorted_results]
+        elif index_dense:
+            # Только dense поиск
+            search_results = self.client.search(
+                collection_name=collection_name,
+                query_vector=("dense_vector", search_vector["dense_vector"]),
+                limit=k,
+                query_filter=search_filter,
+                with_payload=True,
+                with_vectors=False
+            )
+        elif use_sparse:
+            # Только sparse поиск
+            search_results = self.client.search(
+                collection_name=collection_name,
+                query_vector=None,
+                sparse_vector=search_vector,
+                vector_name=getattr(self.config, 'sparse_vector_name', 'sparse_vector'),
+                limit=k,
+                query_filter=search_filter,
+                with_payload=True,
+                with_vectors=False
+            )
+        else:
+            logger.warning("No valid search mode determined")
+            return []
         
         logger.info(f"Search returned {len(search_results)} results")
         

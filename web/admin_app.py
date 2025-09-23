@@ -389,6 +389,18 @@ def update_advanced_settings(form_data: dict, config: Config):
         if sparse_embedding:
             config.sparse_embedding = sparse_embedding
     
+    # Настройки BM25
+    config.use_bm25 = "use_bm25" in form_data
+    if form_data.get("sparse_vector_name") is not None:
+        config.sparse_vector_name = form_data["sparse_vector_name"].strip()
+    if form_data.get("bm25_tokenizer") is not None:
+        config.bm25_tokenizer = form_data["bm25_tokenizer"].strip()
+    if form_data.get("bm25_min_token_len") is not None:
+        try:
+            config.bm25_min_token_len = int(form_data["bm25_min_token_len"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверная минимальная длина токена для BM25")
+    
     # Настройки кэширования
     if form_data.get("config_cache_ttl") is not None:
         try:
