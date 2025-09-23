@@ -79,8 +79,9 @@ if __name__ == "__main__":
             "main:app",
             host="127.0.0.1",
             port=8000,
-            reload=False,
-            reload_excludes=["*.log", "logs/*", "logs/*", "logs/*", "*.log.*", "*.log~"]
+            reload=True,
+            reload_excludes=["*.log", "logs/*", "logs/*", "logs/*", "*.log.*", "*.log~"],
+            reload_dirs=["."]
         )
         logger.info("Сервер запущен")
     except Exception as e:
