@@ -103,6 +103,7 @@ class Config(BaseSettings):
     
     # Настройки поиска
     search_default_k: int = Field(default=5, ge=1)  # Минимум 1 результат
+    use_hybrid: bool = False  # Использовать гибридный поиск (dense + sparse)
     
     # Настройки reranker
     reranker_enabled: bool = False

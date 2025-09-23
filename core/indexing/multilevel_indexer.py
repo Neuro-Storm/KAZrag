@@ -355,11 +355,11 @@ class MultiLevelIndexer:
         
         logger.info(f"Search vector: {search_vector}")
         
-        # Выполняем поиск в Qdrant
+        # Выполняем поиск в Qdrant с именованным вектором
         collection_name = getattr(self.config, 'collection_name', DEFAULT_COLLECTION_NAME)
         search_results = self.client.search(
             collection_name=collection_name,
-            query_vector=search_vector,
+            query_vector=("dense_vector", search_vector),
             limit=k
         )
         

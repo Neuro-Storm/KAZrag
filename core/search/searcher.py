@@ -81,8 +81,8 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         
         logger.info(f"Search mode determined: {search_mode}")
         
-        # Создаем QdrantVectorStore с соответствующими параметрами
-        qdrant = strategy.create_qdrant_store(search_mode)
+        # Теперь возвращаем client, search_mode, etc.
+        client, search_mode, vector_name, sparse_params = strategy.create_qdrant_searcher(search_mode)
         
         # Инициализируем кэш запросов
         query_cache = QueryCache(client, config)
@@ -95,83 +95,13 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         # Получаем или создаем эмбеддинг запроса с использованием кэша
         query_vector = query_cache.get_or_create_query_embedding(query, collection_name, vector_size)
         
-        # Выполняем поиск с использованием кэшированного вектора
-        # Так как мы используем готовый вектор, нам нужно выполнить поиск напрямую через клиент Qdrant
-        try:
-            # Создаем фильтр по метаданным, если он задан
-            search_filter = None
-            if metadata_filter:
-                from qdrant_client.http.models import FieldCondition, Filter, MatchValue, Range
-                must_conditions = []
-                
-                for key, value in metadata_filter.items():
-                    # Обрабатываем различные типы условий
-                    if isinstance(value, dict):
-                        # Сложные условия (например, {"$gt": 2020})
-                        for op, op_value in value.items():
-                            if op == "$gt":
-                                must_conditions.append(FieldCondition(
-                                    key=f"metadata.{key}",
-                                    range=Range(gt=op_value)
-                                ))
-                            elif op == "$gte":
-                                must_conditions.append(FieldCondition(
-                                    key=f"metadata.{key}",
-                                    range=Range(gte=op_value)
-                                ))
-                            elif op == "$lt":
-                                must_conditions.append(FieldCondition(
-                                    key=f"metadata.{key}",
-                                    range=Range(lt=op_value)
-                                ))
-                            elif op == "$lte":
-                                must_conditions.append(FieldCondition(
-                                    key=f"metadata.{key}",
-                                    range=Range(lte=op_value)
-                                ))
-                            elif op == "$contains":
-                                # Для массивов или строк
-                                must_conditions.append(FieldCondition(
-                                    key=f"metadata.{key}",
-                                    match=MatchValue(value=op_value)
-                                ))
-                    else:
-                        # Простое равенство
-                        must_conditions.append(FieldCondition(
-                            key=f"metadata.{key}",
-                            match=MatchValue(value=value)
-                        ))
-                
-                search_filter = Filter(must=must_conditions)
-            
-            # Выполняем поиск по вектору напрямую через клиент Qdrant
-            search_results = client.search(
-                collection_name=collection_name,
-                query_vector=query_vector,
-                limit=k,
-                query_filter=search_filter,
-                with_payload=True,
-                with_vectors=False
-            )
-            
-            # Преобразуем результаты в формат, ожидаемый остальной частью кода
-            results = []
-            for point in search_results:
-                # Создаем объект, похожий на документ Langchain
-                class DocumentLike:
-                    def __init__(self, payload):
-                        self.payload = payload
-                        self.metadata = payload.get('metadata', {})
-                        self.page_content = payload.get('content', '') or payload.get('page_content', '')
-                
-                doc = DocumentLike(point.payload)
-                results.append((doc, point.score))
-            
-            error = None
-        except Exception as e:
-            logger.exception(f"Ошибка при поиске с вектором: {e}")
-            results = []
-            error = str(e)
+        # Для других режимов: использовать SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter)
+        if search_mode != "dense":
+            results, error = await SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter)
+        else:
+            # Выполняем поиск с использованием кэшированного вектора
+            # Используем SearchExecutor для плотного поиска тоже
+            results, error = await SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter)
         
         # Дополнительно обрабатываем результаты для веб-интерфейса
         processed_results = []

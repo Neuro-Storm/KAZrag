@@ -1,13 +1,14 @@
 """Модуль для выполнения поиска."""
 
 import logging
+import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 
-from langchain_qdrant import QdrantVectorStore
 from qdrant_client.http.models import FieldCondition, Filter, MatchValue, Range
 
 from core.search.reranker_manager import RerankerManager
 from config.config_manager import ConfigManager
+from core.embedding.embeddings import get_dense_embedder
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +18,7 @@ class SearchExecutor:
     
     @staticmethod
     async def execute_search_with_vector(
-        qdrant: QdrantVectorStore, 
+        client, 
         query: str,
         query_vector: List[float],
         k: int, 
@@ -27,7 +28,7 @@ class SearchExecutor:
         Выполняет поиск с использованием предварительно вычисленного вектора запроса.
         
         Args:
-            qdrant (QdrantVectorStore): Настроенный экземпляр QdrantVectorStore.
+            client: QdrantClient.
             query (str): Оригинальный текстовый запрос (для логирования и reranking).
             query_vector (List[float]): Предварительно вычисленный вектор запроса.
             k (int): Количество результатов.
@@ -37,6 +38,7 @@ class SearchExecutor:
             Tuple[List[Tuple[Any, float]], Optional[str]]: (результаты поиска, ошибка)
         """
         try:
+            collection_name = ConfigManager.get_instance().get().collection_name  # Получаем из конфига
             # Выполняем поиск с опциональной фильтрацией по метаданным, используя готовый вектор
             if metadata_filter:
                 # Создаем фильтр для Qdrant
@@ -81,56 +83,55 @@ class SearchExecutor:
                         ))
                 
                 search_filter = Filter(must=must_conditions)
-                # Используем готовый вектор для поиска
-                results = qdrant.similarity_search_by_vector_with_score(query_vector, k=k, filter=search_filter)
+                # Используем нативный поиск Qdrant с именованным вектором
+                results = client.search(
+                    collection_name=collection_name,
+                    query_vector=("dense_vector", query_vector),
+                    limit=k,
+                    query_filter=search_filter,
+                    with_payload=True,
+                    with_vectors=False
+                )
             else:
-                # Используем готовый вектор для поиска без фильтров
-                results = qdrant.similarity_search_by_vector_with_score(query_vector, k=k)
+                # Используем нативный поиск Qdrant без фильтров с именованным вектором
+                results = client.search(
+                    collection_name=collection_name,
+                    query_vector=("dense_vector", query_vector),
+                    limit=k,
+                    with_payload=True,
+                    with_vectors=False
+                )
                 
             # Обрабатываем результаты для извлечения содержимого чанков
             processed_results = []
-            for doc, score in results:
-                # Извлекаем дополнительную информацию из metadata
-                content = getattr(doc, 'page_content', '')
-                metadata = getattr(doc, 'metadata', {})
-                
-                # Для многоуровневых чанков содержимое может быть в payload
-                if not content and hasattr(doc, 'payload'):
-                    payload = doc.payload
-                    content = payload.get('content', '')
-                    # Если content все еще пустой, попробуем другие поля
-                    if not content:
-                        content = payload.get('page_content', '')
-                
-                # Если content все еще пустой, попробуем получить из __dict__
-                if not content and hasattr(doc, '__dict__'):
-                    doc_dict = doc.__dict__
-                    content = doc_dict.get('page_content', '')
-                    if not content:
-                        content = doc_dict.get('content', '')
+            for point in results:  # Теперь results - это список PointStruct
+                # Извлекаем дополнительную информацию из payload
+                payload = point.payload if hasattr(point, 'payload') else {}
+                content = payload.get('content', '') or payload.get('page_content', '')
+                metadata = payload.get('metadata', {})
                 
                 # Создаем расширенный объект результата
                 extended_result = {
                     'content': content if content is not None else '',
                     'metadata': metadata,
-                    'original_score': score  # Сохраняем оригинальную оценку
+                    'original_score': point.score if hasattr(point, 'score') else 0  # Сохраняем оригинальную оценку
                 }
                 
                 # Если это многоуровневый чанк, добавляем информацию о микро-чанках
                 if 'micro_contents' in metadata:
                     extended_result['micro_contents'] = metadata['micro_contents']
-                elif hasattr(doc, 'payload') and 'micro_contents' in doc.payload:
-                    extended_result['micro_contents'] = doc.payload['micro_contents']
+                elif 'micro_contents' in payload:
+                    extended_result['micro_contents'] = payload['micro_contents']
                     
                 # Добавляем source если есть
                 if 'source' in metadata:
                     extended_result['source'] = metadata['source']
-                elif hasattr(doc, 'payload') and 'source' in doc.payload:
-                    extended_result['source'] = doc.payload['source']
+                elif 'source' in payload:
+                    extended_result['source'] = payload['source']
                 elif 'source' not in extended_result and 'source' in metadata:
                     extended_result['source'] = metadata.get('source', '')
                     
-                processed_results.append((extended_result, score))
+                processed_results.append((extended_result, point.score if hasattr(point, 'score') else 0))
                 
             logger.debug(f"Search with vector returned {len(processed_results)} results")
             
@@ -148,8 +149,122 @@ class SearchExecutor:
             return [], str(e)
 
     @staticmethod
+    async def execute_hybrid_search(client, query: str, embedder, sparse_emb, k: int, metadata_filter: Optional[Dict[str, Any]] = None):
+        """Выполняет гибридный поиск (dense + sparse)."""
+        try:
+            # Получаем dense vector
+            dense_vector = embedder.embed_query(query)
+            
+            # Получаем sparse vector, если доступен
+            sparse_vector = None
+            if sparse_emb:
+                # Адаптируем под SparseEmbeddingAdapter API
+                sparse_result = sparse_emb.embed_query(query)
+                sparse_vector = {"indices": sparse_result.indices, "values": sparse_result.values}
+            
+            collection_name = ConfigManager.get_instance().get().collection_name
+            search_filter = SearchExecutor._create_filter(metadata_filter) if metadata_filter else None
+            
+            # Выполняем dense поиск с именованным вектором
+            dense_results = client.search(
+                collection_name=collection_name,
+                query_vector=("dense_vector", dense_vector),
+                limit=k * 2,  # Берем больше для reranking
+                with_payload=True,
+                with_vectors=False
+            )
+            
+            # Выполняем sparse поиск
+            sparse_results = []
+            if sparse_vector:
+                sparse_vector_name = "sparse_vector"  # Имя sparse вектора по умолчанию
+                if sparse_params and "sparse_vector_name" in sparse_params:
+                    sparse_vector_name = sparse_params["sparse_vector_name"]
+                
+                sparse_results = client.search(
+                    collection_name=collection_name,
+                    query_vector=(sparse_vector_name, sparse_vector),
+                    limit=k * 2,
+                    query_filter=search_filter,
+                    with_payload=True,
+                    with_vectors=False
+                )
+            
+            # Комбинируем результаты (простой union с весами, alpha=0.7 для dense)
+            alpha = 0.7
+            # Создаем словарь для дедупликации по ID
+            combined_dict = {}
+            
+            # Добавляем dense результаты
+            for point in dense_results:
+                point_id = str(point.id) if hasattr(point, 'id') else str(hash(str(point.payload)))
+                score = point.score if hasattr(point, 'score') else 0
+                combined_dict[point_id] = {
+                    'point': point,
+                    'score': alpha * score
+                }
+            
+            # Добавляем sparse результаты
+            for point in sparse_results:
+                point_id = str(point.id) if hasattr(point, 'id') else str(hash(str(point.payload)))
+                score = point.score if hasattr(point, 'score') else 0
+                if point_id in combined_dict:
+                    # Комбинируем оценки
+                    combined_dict[point_id]['score'] += (1 - alpha) * score
+                else:
+                    combined_dict[point_id] = {
+                        'point': point,
+                        'score': (1 - alpha) * score
+                    }
+            
+            # Сортируем по комбинированной оценке и берем top k
+            sorted_results = sorted(combined_dict.items(), key=lambda x: x[1]['score'], reverse=True)[:k]
+            
+            # Обрабатываем результаты
+            processed_results = []
+            for point_id, data in sorted_results:
+                point = data['point']
+                combined_score = data['score']
+                
+                # Извлекаем дополнительную информацию из payload
+                payload = point.payload if hasattr(point, 'payload') else {}
+                content = payload.get('content', '') or payload.get('page_content', '')
+                metadata = payload.get('metadata', {})
+                
+                # Создаем расширенный объект результата
+                extended_result = {
+                    'content': content if content is not None else '',
+                    'metadata': metadata,
+                    'original_score': combined_score
+                }
+                
+                # Если это многоуровневый чанк, добавляем информацию о микро-чанках
+                if 'micro_contents' in metadata:
+                    extended_result['micro_contents'] = metadata['micro_contents']
+                elif 'micro_contents' in payload:
+                    extended_result['micro_contents'] = payload['micro_contents']
+                    
+                # Добавляем source если есть
+                if 'source' in metadata:
+                    extended_result['source'] = metadata['source']
+                elif 'source' in payload:
+                    extended_result['source'] = payload['source']
+                elif 'source' not in extended_result and 'source' in metadata:
+                    extended_result['source'] = metadata.get('source', '')
+                
+                processed_results.append((extended_result, combined_score))
+            
+            return processed_results, None
+        except Exception as e:
+            logger.exception(f"Ошибка в hybrid поиске: {e}")
+            return [], str(e)
+
+    @staticmethod
     async def execute_search(
-        qdrant: QdrantVectorStore, 
+        client, 
+        search_mode: str,
+        vector_name: Optional[str],
+        sparse_params: Optional[Dict],
         query: str, 
         k: int, 
         metadata_filter: Optional[Dict[str, Any]] = None
@@ -158,7 +273,10 @@ class SearchExecutor:
         Выполняет поиск с опциональной фильтрацией по метаданным.
         
         Args:
-            qdrant (QdrantVectorStore): Настроенный экземпляр QdrantVectorStore.
+            client: QdrantClient.
+            search_mode (str): Режим поиска ("dense", "sparse", "hybrid").
+            vector_name (str): Имя dense vector.
+            sparse_params (Dict): Параметры sparse.
             query (str): Поисковый запрос.
             k (int): Количество результатов.
             metadata_filter (Optional[Dict[str, Any]]): Фильтр по метаданным.
@@ -167,7 +285,6 @@ class SearchExecutor:
             Tuple[List[Tuple[Any, float]], Optional[str]]: (результаты поиска, ошибка)
         """
         try:
-            # Выполняем поиск с опциональной фильтрацией по метаданным
             if metadata_filter:
                 # Создаем фильтр для Qdrant
                 must_conditions = []
@@ -211,56 +328,119 @@ class SearchExecutor:
                         ))
                 
                 search_filter = Filter(must=must_conditions)
-                results = await qdrant.asimilarity_search_with_score(query, k=k, filter=search_filter)
+                # Выполняем поиск в зависимости от режима
+                config = ConfigManager.get_instance().get()
+                embedder = get_dense_embedder(config, "auto")
+                query_vector = embedder.embed_query(query)
+                
+                if search_mode == "hybrid":
+                    return await SearchExecutor.execute_hybrid_search(client, query, embedder, sparse_params.get("sparse_embedding"), k, metadata_filter)
+                elif search_mode == "sparse":
+                    # Sparse поиск
+                    # Для sparse векторов используем именованный sparse вектор
+                    sparse_vector_name = sparse_params["sparse_vector_name"] if sparse_params else "sparse_vector"
+                    results = client.search(
+                        collection_name=config.collection_name,
+                        query_vector=(sparse_vector_name, []),  # Пустой sparse вектор для sparse поиска
+                        limit=k,
+                        query_filter=search_filter,
+                        with_payload=True,
+                        with_vectors=False
+                    )
+                else:
+                    # Dense
+                    # Для dense векторов используем именованный вектор
+                    if vector_name:
+                        results = client.search(
+                            collection_name=config.collection_name,
+                            query_vector=(vector_name, query_vector),
+                            limit=k,
+                            query_filter=search_filter,
+                            with_payload=True,
+                            with_vectors=False
+                        )
+                    else:
+                        # Если имя вектора не указано, используем имя по умолчанию "dense_vector"
+                        results = client.search(
+                            collection_name=config.collection_name,
+                            query_vector=("dense_vector", query_vector),
+                            limit=k,
+                            query_filter=search_filter,
+                            with_payload=True,
+                            with_vectors=False
+                        )
             else:
-                results = await qdrant.asimilarity_search_with_score(query, k=k)
+                # Аналогично без фильтра
+                config = ConfigManager.get_instance().get()
+                embedder = get_dense_embedder(config, "auto")
+                query_vector = embedder.embed_query(query)
+                
+                if search_mode == "hybrid":
+                    return await SearchExecutor.execute_hybrid_search(client, query, embedder, sparse_params.get("sparse_embedding"), k, metadata_filter)
+                elif search_mode == "sparse":
+                    # Sparse поиск
+                    # Для sparse векторов используем именованный sparse вектор
+                    sparse_vector_name = sparse_params["sparse_vector_name"] if sparse_params else "sparse_vector"
+                    results = client.search(
+                        collection_name=config.collection_name,
+                        query_vector=(sparse_vector_name, []),  # Пустой sparse вектор для sparse поиска
+                        limit=k,
+                        with_payload=True,
+                        with_vectors=False
+                    )
+                else:
+                    # Dense
+                    # Для dense векторов используем именованный вектор
+                    if vector_name:
+                        results = client.search(
+                            collection_name=config.collection_name,
+                            query_vector=(vector_name, query_vector),
+                            limit=k,
+                            with_payload=True,
+                            with_vectors=False
+                        )
+                    else:
+                        # Если имя вектора не указано, используем имя по умолчанию "dense_vector"
+                        results = client.search(
+                            collection_name=config.collection_name,
+                            query_vector=("dense_vector", query_vector),
+                            limit=k,
+                            with_payload=True,
+                            with_vectors=False
+                        )
                 
             # Обрабатываем результаты для извлечения содержимого чанков
             processed_results = []
-            for doc, score in results:
-                # Извлекаем дополнительную информацию из metadata
-                content = getattr(doc, 'page_content', '')
-                metadata = getattr(doc, 'metadata', {})
-                
-                # Для многоуровневых чанков содержимое может быть в payload
-                if not content and hasattr(doc, 'payload'):
-                    payload = doc.payload
-                    content = payload.get('content', '')
-                    # Если content все еще пустой, попробуем другие поля
-                    if not content:
-                        content = payload.get('page_content', '')
-                
-                # Если content все еще пустой, попробуем получить из __dict__
-                if not content and hasattr(doc, '__dict__'):
-                    doc_dict = doc.__dict__
-                    content = doc_dict.get('page_content', '')
-                    if not content:
-                        content = doc_dict.get('content', '')
+            for point in results:  # Теперь results - это список PointStruct
+                # Извлекаем дополнительную информацию из payload
+                payload = point.payload if hasattr(point, 'payload') else {}
+                content = payload.get('content', '') or payload.get('page_content', '')
+                metadata = payload.get('metadata', {})
                 
                 # Создаем расширенный объект результата
                 extended_result = {
                     'content': content if content is not None else '',
                     'metadata': metadata,
-                    'original_score': score  # Сохраняем оригинальную оценку
+                    'original_score': point.score if hasattr(point, 'score') else 0  # Сохраняем оригинальную оценку
                 }
                 
                 # Если это многоуровневый чанк, добавляем информацию о микро-чанках
                 if 'micro_contents' in metadata:
                     extended_result['micro_contents'] = metadata['micro_contents']
-                elif hasattr(doc, 'payload') and 'micro_contents' in doc.payload:
-                    extended_result['micro_contents'] = doc.payload['micro_contents']
+                elif 'micro_contents' in payload:
+                    extended_result['micro_contents'] = payload['micro_contents']
                     
                 # Добавляем source если есть
                 if 'source' in metadata:
                     extended_result['source'] = metadata['source']
-                elif hasattr(doc, 'payload') and 'source' in doc.payload:
-                    extended_result['source'] = doc.payload['source']
+                elif 'source' in payload:
+                    extended_result['source'] = payload['source']
                 elif 'source' not in extended_result and 'source' in metadata:
                     extended_result['source'] = metadata.get('source', '')
                     
-                processed_results.append((extended_result, score))
+                processed_results.append((extended_result, point.score if hasattr(point, 'score') else 0))
                 
-            logger.debug(f"Search returned {len(processed_results)} results")
+            logger.debug(f"Search returned {len(processed_results)} results")  # Оставить
             
             # Log first result before returning to see what we have
             if processed_results:
@@ -268,9 +448,54 @@ class SearchExecutor:
                 logger.debug(f"Before returning - First result score: {first_score}, keys: {list(first_result.keys()) if isinstance(first_result, dict) else 'not dict'}")
                 if isinstance(first_result, dict):
                     logger.debug(f"Before returning - original_score: {first_result.get('original_score')}")
-            
+        
             return processed_results, None
             
         except Exception as e:
             logger.exception(f"Ошибка при поиске: {e}")
             return [], str(e)
+
+    @staticmethod
+    def _create_filter(metadata_filter: Optional[Dict[str, Any]]) -> Optional[Filter]:
+        """Вспомогательный метод для создания фильтра."""
+        if not metadata_filter:
+            return None
+        must_conditions = []
+        for key, value in metadata_filter.items():
+            # Обрабатываем различные типы условий
+            if isinstance(value, dict):
+                # Сложные условия (например, {"$gt": 2020})
+                for op, op_value in value.items():
+                    if op == "$gt":
+                        must_conditions.append(FieldCondition(
+                            key=f"metadata.{key}",
+                            range=Range(gt=op_value)
+                        ))
+                    elif op == "$gte":
+                        must_conditions.append(FieldCondition(
+                            key=f"metadata.{key}",
+                            range=Range(gte=op_value)
+                        ))
+                    elif op == "$lt":
+                        must_conditions.append(FieldCondition(
+                            key=f"metadata.{key}",
+                            range=Range(lt=op_value)
+                        ))
+                    elif op == "$lte":
+                        must_conditions.append(FieldCondition(
+                            key=f"metadata.{key}",
+                            range=Range(lte=op_value)
+                        ))
+                    elif op == "$contains":
+                        # Для массивов или строк
+                        must_conditions.append(FieldCondition(
+                            key=f"metadata.{key}",
+                            match=MatchValue(value=op_value)
+                        ))
+            else:
+                # Простое равенство
+                must_conditions.append(FieldCondition(
+                    key=f"metadata.{key}",
+                    match=MatchValue(value=value)
+                ))
+        return Filter(must=must_conditions)

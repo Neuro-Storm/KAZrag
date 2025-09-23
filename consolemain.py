@@ -9,6 +9,7 @@ sys.path.append(str(Path(__file__).parent))
 
 # Import required modules
 from config.config_manager import ConfigManager
+from config.settings import Config
 from config.logging_config import setup_logging, get_logger, setup_intercept_handler
 from core.qdrant.qdrant_client import get_qdrant_client
 from core.qdrant.qdrant_collections import get_cached_collections

@@ -1,8 +1,9 @@
 """Модуль для определения стратегии поиска."""
 
 import logging
+from typing import Tuple, List, Optional, Dict, Any
 
-from langchain_qdrant import QdrantVectorStore, RetrievalMode
+from qdrant_client.http.models import RecommendRequest, SearchRequest, ScoredPoint
 
 from core.search.collection_analyzer import CollectionAnalyzer
 
@@ -65,90 +66,59 @@ class SearchStrategy:
             logger.info("Dense search mode selected (default)")
             return "dense"
     
-    def create_qdrant_store(self, search_mode: str) -> QdrantVectorStore:
+    def create_qdrant_searcher(self, search_mode: str):
         """
-        Создает QdrantVectorStore с соответствующими параметрами.
+        Возвращает настроенный клиент и параметры для поиска.
         
         Args:
             search_mode (str): Режим поиска.
             
         Returns:
-            QdrantVectorStore: Настроенный экземпляр QdrantVectorStore.
+            Tuple[QdrantClient, str, Optional[str], Optional[Any]]: (client, mode, vector_name, sparse_params)
         """
         try:
             if search_mode == "hybrid":
-                # Гибридный поиск
-                logger.info(f"Initializing hybrid QdrantVectorStore for collection '{self.collection_name}'")
-                return QdrantVectorStore(
-                    client=self.client,
-                    collection_name=self.collection_name,
-                    embedding=self.embedder,
-                    vector_name="dense_vector",
-                    sparse_embedding=self.sparse_emb,
-                    sparse_vector_name=self.sparse_vector_name,
-                    retrieval_mode=RetrievalMode.HYBRID
-                )
+                logger.info(f"Configuring hybrid search for collection '{self.collection_name}'")
+                sparse_params = {
+                    "sparse_vector_name": self.sparse_vector_name,
+                    "sparse_embedding": self.sparse_emb
+                }
+                return self.client, "hybrid", "dense_vector", sparse_params
             elif search_mode == "sparse":
-                # Sparse-only поиск
-                logger.info(f"Initializing sparse-only QdrantVectorStore for collection '{self.collection_name}' with sparse_vector_name='{self.sparse_vector_name}'")
-                return QdrantVectorStore(
-                    client=self.client,
-                    collection_name=self.collection_name,
-                    embedding=None,
-                    vector_name=None,
-                    sparse_embedding=self.sparse_emb,
-                    sparse_vector_name=self.sparse_vector_name,
-                    retrieval_mode=RetrievalMode.SPARSE
-                )
+                logger.info(f"Configuring sparse-only search for collection '{self.collection_name}' with sparse_vector_name='{self.sparse_vector_name}'")
+                return self.client, "sparse", None, {
+                    "sparse_vector_name": self.sparse_vector_name,
+                    "sparse_embedding": self.sparse_emb
+                }
             else:
                 # Dense-only поиск (по умолчанию)
-                logger.info(f"Initializing dense-only QdrantVectorStore for collection '{self.collection_name}' (fallback)")
-                return QdrantVectorStore(
-                    client=self.client,
-                    collection_name=self.collection_name,
-                    embedding=self.embedder,
-                    vector_name="dense_vector"
-                )
+                logger.info(f"Configuring dense-only search for collection '{self.collection_name}'")
+                return self.client, "dense", "dense_vector", None
         except Exception as e:
-            # Если возникла ошибка при создании QdrantVectorStore, проверим, не связана ли она с конфликтом размерностей
+            # Если возникла ошибка, проверим, не связана ли она с конфликтом размерностей
             err_msg = str(e)
             if "dimensions" in err_msg and "force_recreate" in err_msg:
                 logger.warning(f"Конфликт размерностей векторов в коллекции '{self.collection_name}'. Попытка пересоздать коллекцию.")
-                # В новой версии langchain-qdrant параметр force_recreate больше не используется
-                # Вместо этого явно пересоздаем коллекцию через клиент Qdrant
-                try:
+                # В новой версии нативного клиента этот блок остается для совместимости, но теперь не нужен для нативного
+                try:  # Этот блок остается для совместимости, но теперь не нужен для нативного
                     # Удаляем существующую коллекцию
                     self.client.delete_collection(self.collection_name)
                     logger.info(f"Коллекция '{self.collection_name}' удалена. Повторная попытка создания QdrantVectorStore.")
                     
-                    # Повторная попытка создания QdrantVectorStore
+                    # Повторная попытка
                     if search_mode == "hybrid":
-                        return QdrantVectorStore(
-                            client=self.client,
-                            collection_name=self.collection_name,
-                            embedding=self.embedder,
-                            vector_name="dense_vector",
-                            sparse_embedding=self.sparse_emb,
-                            sparse_vector_name=self.sparse_vector_name,
-                            retrieval_mode=RetrievalMode.HYBRID
-                        )
+                        sparse_params = {
+                            "sparse_vector_name": self.sparse_vector_name,
+                            "sparse_embedding": self.sparse_emb
+                        }
+                        return self.client, "hybrid", "dense_vector", sparse_params
                     elif search_mode == "sparse":
-                        return QdrantVectorStore(
-                            client=self.client,
-                            collection_name=self.collection_name,
-                            embedding=None,
-                            vector_name=None,
-                            sparse_embedding=self.sparse_emb,
-                            sparse_vector_name=self.sparse_vector_name,
-                            retrieval_mode=RetrievalMode.SPARSE
-                        )
+                        return self.client, "sparse", None, {
+                            "sparse_vector_name": self.sparse_vector_name,
+                            "sparse_embedding": self.sparse_emb
+                        }
                     else:
-                        return QdrantVectorStore(
-                            client=self.client,
-                            collection_name=self.collection_name,
-                            embedding=self.embedder,
-                            vector_name="dense_vector"
-                        )
+                        return self.client, "dense", "dense_vector", None
                 except Exception as recreate_error:
                     logger.exception(f"Не удалось пересоздать коллекцию '{self.collection_name}': {recreate_error}")
                     raise recreate_error
