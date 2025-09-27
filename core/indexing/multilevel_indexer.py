@@ -223,12 +223,8 @@ class MultiLevelIndexer:
             sparse_vector = None
             if self.sparse_emb:
                 try:
-                    sparse_vector_obj = self.sparse_emb.embed_query(macro_chunk.page_content)
-                    # Для sparse векторов в Qdrant используем формат с indices и values
-                    sparse_vector = {
-                        "indices": sparse_vector_obj.indices.tolist() if hasattr(sparse_vector_obj.indices, 'tolist') else list(sparse_vector_obj.indices),
-                        "values": sparse_vector_obj.values.tolist() if hasattr(sparse_vector_obj.values, 'tolist') else list(sparse_vector_obj.values)
-                    }
+                    sparse_vector = self.sparse_emb.embed_query(macro_chunk.page_content)
+                    # sparse_vector уже в формате {"indices": [...], "values": [...]} от адаптера
                 except Exception as e:
                     logger.warning(f"Ошибка при генерации sparse вектора: {e}")
             
@@ -327,11 +323,8 @@ class MultiLevelIndexer:
             dense_query_vector = self.embedding_manager.embed_query(query)
             
             # Векторизуем запрос для sparse поиска
-            sparse_vector_obj = self.sparse_emb.embed_query(query)
-            sparse_vector = {
-                "indices": sparse_vector_obj.indices.tolist() if hasattr(sparse_vector_obj.indices, 'tolist') else list(sparse_vector_obj.indices),
-                "values": sparse_vector_obj.values.tolist() if hasattr(sparse_vector_obj.values, 'tolist') else list(sparse_vector_obj.values)
-            }
+            sparse_vector = self.sparse_emb.embed_query(query)
+            # sparse_vector уже в формате {"indices": [...], "values": [...]} от адаптера
             
             # Для гибридного поиска передаем оба вектора
             search_vector = {
@@ -346,11 +339,8 @@ class MultiLevelIndexer:
             logger.info("Using dense search mode")
         elif use_sparse:
             # Только sparse поиск
-            sparse_vector_obj = self.sparse_emb.embed_query(query)
-            sparse_vector = {
-                "indices": sparse_vector_obj.indices.tolist() if hasattr(sparse_vector_obj.indices, 'tolist') else list(sparse_vector_obj.indices),
-                "values": sparse_vector_obj.values.tolist() if hasattr(sparse_vector_obj.values, 'tolist') else list(sparse_vector_obj.values)
-            }
+            sparse_vector = self.sparse_emb.embed_query(query)
+            # sparse_vector уже в формате {"indices": [...], "values": [...]} от адаптера
             search_vector = {getattr(self.config, 'sparse_vector_name', 'sparse_vector'): sparse_vector}
             logger.info("Using sparse search mode")
         else:

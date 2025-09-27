@@ -4,7 +4,6 @@ import logging
 import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 
-from qdrant_client import models
 from qdrant_client.http.models import FieldCondition, Filter, MatchValue, Range
 from qdrant_client.models import SparseVector
 
@@ -184,19 +183,11 @@ class SearchExecutor:
             # Выполняем sparse поиск
             sparse_results = []
             if sparse_dict and sparse_name:
-                # Создаем NamedSparseVector для query_vector
-                sparse_vec = models.SparseVector(
-                    indices=sparse_dict["indices"],
-                    values=sparse_dict["values"]
-                )
-                named_sparse = models.NamedSparseVector(
-                    name=sparse_name,
-                    vector=sparse_vec
-                )
-                
                 sparse_results = client.search(
                     collection_name=collection_name,
-                    query_vector=named_sparse,  # Передаем sparse как query_vector
+                    query_vector=None,
+                    sparse_vector={sparse_name: sparse_dict},
+                    vector_name=sparse_name,  # Use named sparse
                     limit=k * 2,
                     query_filter=search_filter,
                     with_payload=True,
@@ -321,19 +312,11 @@ class SearchExecutor:
                     sparse_vector = sparse_result  # уже в правильном формате
                 
                 if sparse_vector:
-                    # Создаем NamedSparseVector для query_vector
-                    sparse_vec = models.SparseVector(
-                        indices=sparse_vector["indices"],
-                        values=sparse_vector["values"]
-                    )
-                    named_sparse = models.NamedSparseVector(
-                        name=sparse_vector_name,
-                        vector=sparse_vec
-                    )
-                    
                     results = client.search(
                         collection_name=config.collection_name,
-                        query_vector=named_sparse,  # Передаем sparse как query_vector
+                        query_vector=None,  # Для sparse поиска query_vector=None
+                        sparse_vector={sparse_vector_name: sparse_vector},  # {indices: [...], values: [...]}
+                        vector_name=sparse_vector_name,  # Имя sparse named vector
                         limit=k,
                         query_filter=search_filter,
                         with_payload=True,

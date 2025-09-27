@@ -28,7 +28,9 @@ def startup_event_handler() -> None:
             logger.info("Initializing BM25 collection configuration")
             try:
                 client = get_qdrant_client(config)
-                strategy = SearchStrategy(client, config.collection_name, None)
+                from core.embedding.sparse_embedding_adapter import SparseEmbeddingAdapter
+                sparse_emb = SparseEmbeddingAdapter(config)
+                strategy = SearchStrategy(client, config.collection_name, None, sparse_emb)
                 strategy.create_or_update_collection_for_bm25()
                 logger.info("BM25 collection configuration initialized successfully")
             except Exception as e:

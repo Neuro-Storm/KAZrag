@@ -2,7 +2,7 @@
 
 import logging
 from collections import Counter
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 
 from qdrant_client.models import SparseVector
 from config.config_manager import ConfigManager
@@ -19,16 +19,17 @@ class SparseEmbeddingAdapter:
         if not self.config.use_bm25:
             raise ValueError("BM25 not enabled in config")
 
-    def encode(self, texts: List[str], return_sparse: bool = True) -> List[SparseVector]:
+    def encode(self, texts: List[str], return_sparse: bool = True) -> List[Dict[str, Any]]:
         """
         Генерирует sparse vectors для текстов (native BM25-like: токены + TF weights).
+        Returns raw dict for Qdrant JSON: {"indices": [int], "values": [float]}.
         
         Args:
             texts: List of texts.
             return_sparse: Always True for sparse.
             
         Returns:
-            List of SparseVector (indices: token hashes, values: TF).
+            List of dict (for SparseVector).
         """
         sparse_vectors = []
         for text in texts:
@@ -38,20 +39,20 @@ class SparseEmbeddingAdapter:
             
             # TF weights (frequency)
             token_counts = Counter(tokens)
-            total_terms = len(tokens)
-            indices = [hash(token) for token in token_counts.keys()]  # Use hash for indices (positive ints)
-            values = [count / total_terms for count in token_counts.values()]  # Normalized TF
+            total_terms = len(tokens) or 1  # Avoid div/0
+            indices = [abs(hash(token)) % (2**31 - 1) for token in token_counts.keys()]  # Positive unique-ish ints
+            values = [count / total_terms for count in token_counts.values()]
             
-            # Ensure indices are unique and sorted (Qdrant requirement)
-            indexed = sorted(zip(indices, values))
-            indices = [idx for idx, _ in indexed]
-            values = [val for _, val in indexed]
+            # Ensure unique/sorted (Qdrant req)
+            unique_pairs = sorted(set(zip(indices, values)), key=lambda x: x[0])
+            indices = [idx for idx, _ in unique_pairs]
+            values = [val for _, val in unique_pairs]
             
-            sparse_vectors.append(SparseVector(indices=indices, values=values))
+            sparse_vectors.append({"indices": indices, "values": values})
         
         logger.debug(f"Generated {len(sparse_vectors)} sparse vectors for BM25")
         return sparse_vectors
 
-    def embed_query(self, query: str) -> SparseVector:
+    def embed_query(self, query: str) -> Dict[str, Any]:
         """Single query embedding."""
         return self.encode([query], return_sparse=True)[0]

@@ -62,7 +62,7 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
                 from core.embedding.sparse_embedding_adapter import (
                     SparseEmbeddingAdapter,
                 )
-                sparse_emb = SparseEmbeddingAdapter(config.sparse_embedding)  # Используем config
+                sparse_emb = SparseEmbeddingAdapter(config)  # Используем полный config объект
                 logger.info(f"Sparse embedding adapter initialized: {config.sparse_embedding}")
             except ImportError:
                 logger.warning("fastembed не доступен — отключение sparse search.")

@@ -584,7 +584,9 @@ def startup_event_handler() -> None:
             logger.info("Initializing BM25 collection configuration")
             try:
                 client = get_qdrant_client(config)
-                strategy = SearchStrategy(client, config.collection_name, None)
+                from core.embedding.sparse_embedding_adapter import SparseEmbeddingAdapter
+                sparse_emb = SparseEmbeddingAdapter(config)
+                strategy = SearchStrategy(client, config.collection_name, None, sparse_emb)
                 strategy.create_or_update_collection_for_bm25()
                 logger.info("BM25 collection configuration initialized successfully")
             except Exception as e:
@@ -2604,7 +2606,7 @@ def get_gguf_embedder(config: Config, device=None):
 
 import logging
 from collections import Counter
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Any
 
 from qdrant_client.models import SparseVector
 from config.config_manager import ConfigManager
@@ -2621,16 +2623,17 @@ class SparseEmbeddingAdapter:
         if not self.config.use_bm25:
             raise ValueError("BM25 not enabled in config")
 
-    def encode(self, texts: List[str], return_sparse: bool = True) -> List[SparseVector]:
+    def encode(self, texts: List[str], return_sparse: bool = True) -> List[Dict[str, Any]]:
         """
         Генерирует sparse vectors для текстов (native BM25-like: токены + TF weights).
+        Returns raw dict for Qdrant JSON: {"indices": [int], "values": [float]}.
         
         Args:
             texts: List of texts.
             return_sparse: Always True for sparse.
             
         Returns:
-            List of SparseVector (indices: token hashes, values: TF).
+            List of dict (for SparseVector).
         """
         sparse_vectors = []
         for text in texts:
@@ -2640,21 +2643,21 @@ class SparseEmbeddingAdapter:
             
             # TF weights (frequency)
             token_counts = Counter(tokens)
-            total_terms = len(tokens)
-            indices = [hash(token) for token in token_counts.keys()]  # Use hash for indices (positive ints)
-            values = [count / total_terms for count in token_counts.values()]  # Normalized TF
+            total_terms = len(tokens) or 1  # Avoid div/0
+            indices = [abs(hash(token)) % (2**31 - 1) for token in token_counts.keys()]  # Positive unique-ish ints
+            values = [count / total_terms for count in token_counts.values()]
             
-            # Ensure indices are unique and sorted (Qdrant requirement)
-            indexed = sorted(zip(indices, values))
-            indices = [idx for idx, _ in indexed]
-            values = [val for _, val in indexed]
+            # Ensure unique/sorted (Qdrant req)
+            unique_pairs = sorted(set(zip(indices, values)), key=lambda x: x[0])
+            indices = [idx for idx, _ in unique_pairs]
+            values = [val for _, val in unique_pairs]
             
-            sparse_vectors.append(SparseVector(indices=indices, values=values))
+            sparse_vectors.append({"indices": indices, "values": values})
         
         logger.debug(f"Generated {len(sparse_vectors)} sparse vectors for BM25")
         return sparse_vectors
 
-    def embed_query(self, query: str) -> SparseVector:
+    def embed_query(self, query: str) -> Dict[str, Any]:
         """Single query embedding."""
         return self.encode([query], return_sparse=True)[0]
 ====================================================================================================
@@ -4243,12 +4246,8 @@ class MultiLevelIndexer:
             sparse_vector = None
             if self.sparse_emb:
                 try:
-                    sparse_vector_obj = self.sparse_emb.embed_query(macro_chunk.page_content)
-                    # Для sparse векторов в Qdrant используем формат с indices и values
-                    sparse_vector = {
-                        "indices": sparse_vector_obj.indices.tolist() if hasattr(sparse_vector_obj.indices, 'tolist') else list(sparse_vector_obj.indices),
-                        "values": sparse_vector_obj.values.tolist() if hasattr(sparse_vector_obj.values, 'tolist') else list(sparse_vector_obj.values)
-                    }
+                    sparse_vector = self.sparse_emb.embed_query(macro_chunk.page_content)
+                    # sparse_vector уже в формате {"indices": [...], "values": [...]} от адаптера
                 except Exception as e:
                     logger.warning(f"Ошибка при генерации sparse вектора: {e}")
             
@@ -4347,11 +4346,8 @@ class MultiLevelIndexer:
             dense_query_vector = self.embedding_manager.embed_query(query)
             
             # Векторизуем запрос для sparse поиска
-            sparse_vector_obj = self.sparse_emb.embed_query(query)
-            sparse_vector = {
-                "indices": sparse_vector_obj.indices.tolist() if hasattr(sparse_vector_obj.indices, 'tolist') else list(sparse_vector_obj.indices),
-                "values": sparse_vector_obj.values.tolist() if hasattr(sparse_vector_obj.values, 'tolist') else list(sparse_vector_obj.values)
-            }
+            sparse_vector = self.sparse_emb.embed_query(query)
+            # sparse_vector уже в формате {"indices": [...], "values": [...]} от адаптера
             
             # Для гибридного поиска передаем оба вектора
             search_vector = {
@@ -4366,11 +4362,8 @@ class MultiLevelIndexer:
             logger.info("Using dense search mode")
         elif use_sparse:
             # Только sparse поиск
-            sparse_vector_obj = self.sparse_emb.embed_query(query)
-            sparse_vector = {
-                "indices": sparse_vector_obj.indices.tolist() if hasattr(sparse_vector_obj.indices, 'tolist') else list(sparse_vector_obj.indices),
-                "values": sparse_vector_obj.values.tolist() if hasattr(sparse_vector_obj.values, 'tolist') else list(sparse_vector_obj.values)
-            }
+            sparse_vector = self.sparse_emb.embed_query(query)
+            # sparse_vector уже в формате {"indices": [...], "values": [...]} от адаптера
             search_vector = {getattr(self.config, 'sparse_vector_name', 'sparse_vector'): sparse_vector}
             logger.info("Using sparse search mode")
         else:
@@ -5754,7 +5747,7 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
                 from core.embedding.sparse_embedding_adapter import (
                     SparseEmbeddingAdapter,
                 )
-                sparse_emb = SparseEmbeddingAdapter(config.sparse_embedding)  # Используем config
+                sparse_emb = SparseEmbeddingAdapter(config)  # Используем полный config объект
                 logger.info(f"Sparse embedding adapter initialized: {config.sparse_embedding}")
             except ImportError:
                 logger.warning("fastembed не доступен — отключение sparse search.")
@@ -6049,6 +6042,61 @@ class SearchExecutor:
                     with_payload=True,
                     with_vectors=False
                 )
+                # Аналогично без фильтра
+                config = ConfigManager.get_instance().get()
+                embedder = get_dense_embedder(config, "auto")
+                query_vector = embedder.embed_query(query)
+                
+                if search_mode == "hybrid":
+                    results, error = await SearchExecutor.execute_hybrid_search(client, query, embedder, sparse_params.get("sparse_embedding"), k, metadata_filter)
+                    if error:
+                        return [], error
+                elif search_mode == "sparse":
+                        # Sparse поиск
+                        # Для sparse векторов используем именованный sparse вектор
+                        sparse_vector_name = sparse_params["sparse_vector_name"] if sparse_params else config.sparse_vector_name
+                        # Получаем sparse вектор через sparse embedding
+                        sparse_embedding = sparse_params.get("sparse_embedding")
+                        sparse_vector = None
+                        if sparse_embedding:
+                            # sparse_result уже в формате {"indices": [...], "values": [...]} от адаптера
+                            sparse_result = sparse_embedding.embed_query(query)
+                            sparse_vector = sparse_result  # уже в правильном формате
+                        
+                        if sparse_vector:
+                            results = client.search(
+                                collection_name=config.collection_name,
+                                query_vector=None,  # Для sparse поиска query_vector=None
+                                sparse_vector={sparse_vector_name: sparse_vector},  # {indices: [...], values: [...]}
+                                vector_name=sparse_vector_name,  # Имя sparse named vector
+                                limit=k,
+                                with_payload=True,
+                                with_vectors=False
+                            )
+                        else:
+                            # Если sparse вектор не создан, возвращаем пустой результат
+                            results = []
+                    else:
+                        # Dense
+                        # Для dense векторов используем именованный вектор
+                        if vector_name:
+                            results = client.search(
+                                collection_name=config.collection_name,
+                                query_vector=(vector_name, query_vector),
+                                limit=k,
+                                with_payload=True,
+                                with_vectors=False
+                            )
+                        else:
+                            # Если имя вектора не указано, используем имя по умолчанию "dense_vector"
+                            results = client.search(
+                                collection_name=config.collection_name,
+                                query_vector=("dense_vector", query_vector),
+                                limit=k,
+                                with_payload=True,
+                                with_vectors=False
+                            )
+
                 
             # Обрабатываем результаты для извлечения содержимого чанков
             processed_results = []
@@ -6105,16 +6153,12 @@ class SearchExecutor:
             dense_vector = embedder.embed_query(query)
             
             # Получаем sparse vector, если доступен
-            sparse_vector = None
+            sparse_dict = None
             sparse_name = None
             if sparse_params and sparse_params.get("sparse_embedding"):
                 sparse_emb = sparse_params["sparse_embedding"]
-                sparse_vector = sparse_emb.embed_query(query)  # Now SparseVector from native adapter
-                # Ensure it's dict for Qdrant (if needed)
-                if isinstance(sparse_vector, SparseVector):
-                    sparse_dict = {"indices": sparse_vector.indices, "values": sparse_vector.values}
-                else:
-                    sparse_dict = sparse_vector
+                sparse_dict = sparse_emb.embed_query(query)  # Now already in dict format from native adapter
+                # sparse_dict is already in the correct format {"indices": [...], "values": [...]}
                 
                 sparse_name = sparse_params.get("sparse_vector_name", config.sparse_vector_name)
             
@@ -6133,7 +6177,7 @@ class SearchExecutor:
             
             # Выполняем sparse поиск
             sparse_results = []
-            if sparse_vector and sparse_name:
+            if sparse_dict and sparse_name:
                 sparse_results = client.search(
                     collection_name=collection_name,
                     query_vector=None,
@@ -6289,7 +6333,9 @@ class SearchExecutor:
                 query_vector = embedder.embed_query(query)
                 
                 if search_mode == "hybrid":
-                    return await SearchExecutor.execute_hybrid_search(client, query, embedder, sparse_params.get("sparse_embedding"), k, metadata_filter)
+                    results, error = await SearchExecutor.execute_hybrid_search(client, query, embedder, sparse_params.get("sparse_embedding"), k, metadata_filter)
+                    if error:
+                        return [], error
                 elif search_mode == "sparse":
                     # Sparse поиск
                     # Для sparse векторов используем именованный sparse вектор
@@ -6298,12 +6344,9 @@ class SearchExecutor:
                     sparse_embedding = sparse_params.get("sparse_embedding")
                     sparse_vector = None
                     if sparse_embedding:
-                        # Адаптируем под SparseEmbeddingAdapter API
+                        # sparse_result уже в формате {"indices": [...], "values": [...]} от адаптера
                         sparse_result = sparse_embedding.embed_query(query)
-                        if isinstance(sparse_result, SparseVector):
-                            sparse_vector = {"indices": sparse_result.indices, "values": sparse_result.values}
-                        else:
-                            sparse_vector = {"indices": sparse_result.indices, "values": sparse_result.values}
+                        sparse_vector = sparse_result  # уже в правильном формате
                     
                     if sparse_vector:
                         results = client.search(
@@ -6341,62 +6384,8 @@ class SearchExecutor:
                             with_payload=True,
                             with_vectors=False
                         )
-            else:
-                # Аналогично без фильтра
-                config = ConfigManager.get_instance().get()
-                embedder = get_dense_embedder(config, "auto")
-                query_vector = embedder.embed_query(query)
-                
-                if search_mode == "hybrid":
-                    return await SearchExecutor.execute_hybrid_search(client, query, embedder, sparse_params.get("sparse_embedding"), k, metadata_filter)
-                elif search_mode == "sparse":
-                    # Sparse поиск
-                    # Для sparse векторов используем именованный sparse вектор
-                    sparse_vector_name = sparse_params["sparse_vector_name"] if sparse_params else config.sparse_vector_name
-                    # Получаем sparse вектор через sparse embedding
-                    sparse_embedding = sparse_params.get("sparse_embedding")
-                    sparse_vector = None
-                    if sparse_embedding:
-                        # Адаптируем под SparseEmbeddingAdapter API
-                        sparse_result = sparse_embedding.embed_query(query)
-                        if isinstance(sparse_result, SparseVector):
-                            sparse_vector = {"indices": sparse_result.indices, "values": sparse_result.values}
-                        else:
-                            sparse_vector = {"indices": sparse_result.indices, "values": sparse_result.values}
-                    
-                    if sparse_vector:
-                        results = client.search(
-                            collection_name=config.collection_name,
-                            query_vector=None,  # Для sparse поиска query_vector=None
-                            sparse_vector={sparse_vector_name: sparse_vector},  # {indices: [...], values: [...]}
-                            vector_name=sparse_vector_name,  # Имя sparse named vector
-                            limit=k,
-                            with_payload=True,
-                            with_vectors=False
-                        )
-                    else:
-                        # Если sparse вектор не создан, возвращаем пустой результат
-                        results = []
-                else:
-                    # Dense
-                    # Для dense векторов используем именованный вектор
-                    if vector_name:
-                        results = client.search(
-                            collection_name=config.collection_name,
-                            query_vector=(vector_name, query_vector),
-                            limit=k,
-                            with_payload=True,
-                            with_vectors=False
-                        )
-                    else:
-                        # Если имя вектора не указано, используем имя по умолчанию "dense_vector"
-                        results = client.search(
-                            collection_name=config.collection_name,
-                            query_vector=("dense_vector", query_vector),
-                            limit=k,
-                            with_payload=True,
-                            with_vectors=False
-                        )
+        
+        
                 
             # Обрабатываем результаты для извлечения содержимого чанков
             processed_results = []
