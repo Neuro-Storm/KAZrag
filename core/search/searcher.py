@@ -12,6 +12,7 @@ from core.search.collection_analyzer import CollectionAnalyzer
 from core.search.search_executor import SearchExecutor
 from core.search.search_strategy import SearchStrategy
 from core.search.query_cache import QueryCache
+from core.llm.llm_service import get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -269,6 +270,52 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
     except Exception as e:
         logger.exception(f"Ошибка при поиске: {e}")
         return [], str(e)
+
+
+def generate_rag_response(
+    query: str,
+    results: List[Tuple[Any, float]],
+    config: Config
+) -> Optional[str]:
+    """
+    Генерация RAG-ответа на базе результатов поиска.
+    
+    Args:
+        query: Запрос.
+        results: Топ-результаты поиска.
+        config: Конфигурация.
+        
+    Returns:
+        str: Ответ LLM или None.
+    """
+    if not config.rag_enabled or len(results) == 0:
+        return None
+    
+    # Собираем контекст из top_k
+    top_k = min(config.rag_top_k, len(results))
+    context_parts = []
+    for res, _ in results[:top_k]:
+        content = res.get('content') or res.get('page_content', '')
+        source = res.get('metadata', {}).get('source', 'Unknown')
+        context_parts.append(f"Source: {source}\n{content}\n---")
+    
+    context = "\n".join(context_parts)
+    
+    # Получаем LLM сервис
+    llm_service = get_llm_service(config)
+    if not llm_service:
+        logger.error("LLM сервис недоступен.")
+        return None
+    
+    # Генерируем
+    response = llm_service.generate(
+        system_prompt=config.rag_system_prompt,
+        user_query=query,
+        context=context,
+        max_tokens=config.rag_max_tokens,
+        temperature=config.rag_temperature
+    )
+    return response
 
 
 def search_collections(query: str, k: int = None, metadata_filter: Optional[Dict[str, Any]] = None) -> List[Tuple[Any, float]]:

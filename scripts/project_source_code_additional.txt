@@ -1079,6 +1079,7 @@ class Config(BaseSettings):
     # Настройки поиска
     search_default_k: int = Field(default=5, ge=1)  # Минимум 1 результат
     use_hybrid: bool = False  # Использовать гибридный поиск (dense + sparse)
+    hybrid_alpha: float = Field(default=0.7, ge=0.0, le=1.0)  # Вес для dense в гибридном поиске
     
     # BM25 Native Sparse Configuration
     use_bm25: bool = True  # Enable native BM25 via sparse vectors with IDF
@@ -2605,6 +2606,7 @@ def get_gguf_embedder(config: Config, device=None):
 """Адаптер для разреженных эмбеддингов с native BM25."""
 
 import logging
+import re
 from collections import Counter
 from typing import Dict, List, Tuple, Any
 
@@ -2637,8 +2639,9 @@ class SparseEmbeddingAdapter:
         """
         sparse_vectors = []
         for text in texts:
-            # Simple tokenization (adapt to config.bm25_tokenizer)
-            tokens = text.lower().split()  # Word tokenizer
+            # Advanced tokenization to better match Qdrant native BM25
+            # Use more sophisticated tokenization similar to what Qdrant uses
+            tokens = self._tokenize_text(text)
             tokens = [t for t in tokens if len(t) >= self.config.bm25_min_token_len]
             
             # TF weights (frequency)
@@ -2656,6 +2659,20 @@ class SparseEmbeddingAdapter:
         
         logger.debug(f"Generated {len(sparse_vectors)} sparse vectors for BM25")
         return sparse_vectors
+
+    def _tokenize_text(self, text: str) -> List[str]:
+        """
+        Advanced tokenization that better matches Qdrant native BM25.
+        Qdrant typically uses word-level tokenization with some normalization.
+        """
+        # Convert to lowercase
+        text = text.lower()
+        
+        # Use regex to find word-like tokens (letters, numbers, and hyphens within words)
+        # This should better match the Qdrant native tokenization
+        tokens = re.findall(r'\b\w+(?:-\w+)*\b', text)
+        
+        return tokens
 
     def embed_query(self, query: str) -> Dict[str, Any]:
         """Single query embedding."""
@@ -4407,7 +4424,8 @@ class MultiLevelIndexer:
             combined_dict = {}
             
             # Добавляем dense результаты (с коэффициентом alpha)
-            alpha = 0.7  # Вес для dense результатов (повышенный вес для семантики)
+            config = ConfigManager.get_instance().get()
+            alpha = getattr(config, "hybrid_alpha", 0.7)  # Вес для dense результатов (повышенный вес для семантики)
             for result in dense_results:
                 result_id = result.id
                 combined_dict[result_id] = {
@@ -5150,10 +5168,44 @@ class CollectionAnalyzer:
                         sparse_vector_names = list(sparse_vectors.keys())
                         if sparse_vector_names:
                             sparse_vector_name = sparse_vector_names[0]  # Берем первое имя
+                            logger.info(f"Detected sparse vector name: {sparse_vector_name}")
                         else:
                             sparse_vector_name = sparse_name or "sparse_vector"
+                            logger.info(f"Using provided sparse vector name: {sparse_vector_name}")
                     else:
-                        sparse_vector_name = sparse_name or "sparse_vector"
+                        # Try to detect the sparse vector name from the collection info more thoroughly
+                        try:
+                            # Check if there are any sparse vectors in the collection's points structure
+                            points_sample = client.scroll(
+                                collection_name=collection_name,
+                                limit=1,
+                                with_payload=False,
+                                with_vectors=True
+                            )
+                            if points_sample[0] if isinstance(points_sample, list) and len(points_sample) > 0 else False:
+                                point = points_sample[0]
+                                if hasattr(point, 'vector') and isinstance(point.vector, dict):
+                                    vector_names = list(point.vector.keys())
+                                    sparse_candidates = [name for name in vector_names if 'sparse' in name.lower() or 'bm25' in name.lower()]
+                                    if sparse_candidates:
+                                        sparse_vector_name = sparse_candidates[0]
+                                        has_sparse = True
+                                        logger.info(f"Detected sparse vector name from point vectors: {sparse_vector_name}")
+                                    else:
+                                        # Fallback to checking if 'bm25_text' exists
+                                        if 'bm25_text' in vector_names:
+                                            sparse_vector_name = 'bm25_text'
+                                            has_sparse = True
+                                            logger.info(f"Found 'bm25_text' sparse vector: {sparse_vector_name}")
+                                        else:
+                                            sparse_vector_name = sparse_name or "sparse_vector"
+                                            logger.info(f"Using provided/fallback sparse vector name: {sparse_vector_name}")
+                                else:
+                                    sparse_vector_name = sparse_name or "sparse_vector"
+                                    logger.info(f"Using provided/fallback sparse vector name: {sparse_vector_name}")
+                        except Exception as e:
+                            logger.debug(f"Could not detect sparse vector names from points: {e}")
+                            sparse_vector_name = sparse_name or "sparse_vector"
                         
                     logger.debug(f"Analysis result: has_dense={has_dense}, has_sparse={has_sparse}, sparse_vector_name={sparse_vector_name}")
                 else:
@@ -5687,6 +5739,7 @@ class RerankerManager:
 
 import logging
 from typing import Any, Dict, List, Optional, Tuple
+from qdrant_client.http.models import CountResult
 
 from config.config_manager import ConfigManager
 from config.settings import Config
@@ -5701,7 +5754,7 @@ logger = logging.getLogger(__name__)
 
 
 async def search_in_collection(query: str, collection_name: str, device: str, k: int = None, hybrid: bool = False, 
-                              metadata_filter: Optional[Dict[str, Any]] = None, client = None) -> Tuple[List[Tuple[Any, float]], Optional[str]]:
+                              search_mode_override: str = None, metadata_filter: Optional[Dict[str, Any]] = None, client = None) -> Tuple[List[Tuple[Any, float]], Optional[str]]:
     """
     Выполняет поиск в указанной коллекции Qdrant.
     
@@ -5741,14 +5794,35 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         logger.info(f"Collection analysis: has_dense={has_dense}, has_sparse={has_sparse}, sparse_vector_name={sparse_vector_name}")
         logger.info(f"Search parameters: hybrid={hybrid}, device={device}")
         
-        # Инициализируем sparse embedding для всех режимов поиска, где он может быть нужен
-        if has_sparse:
+        # Инициализируем sparse embedding если он нужен и включен в конфигурации
+        sparse_emb = None
+        if has_sparse and config.use_bm25:
             try:
                 from core.embedding.sparse_embedding_adapter import (
                     SparseEmbeddingAdapter,
                 )
                 sparse_emb = SparseEmbeddingAdapter(config)  # Используем полный config объект
                 logger.info(f"Sparse embedding adapter initialized: {config.sparse_embedding}")
+                
+                # Debug sample doc sparse
+                try:
+                    sample_points = client.scroll(
+                        collection_name=collection_name,
+                        limit=1,
+                        with_vectors=True
+                    )
+                    if sample_points and len(sample_points[0]) > 0:
+                        sample_point = sample_points[0][0]  # First point
+                        if hasattr(sample_point, 'vectors') and sample_point.vectors:
+                            sparse_vec_sample = sample_point.vectors.get(config.sparse_vector_name)
+                            if sparse_vec_sample:
+                                logger.info(f"Sample doc sparse: indices={sparse_vec_sample.indices[:5]}..., non-zero={sum(1 for v in sparse_vec_sample.values if v > 0)}")
+                            else:
+                                logger.warning("No sparse vector in sample point")
+                        else:
+                            logger.warning("No vectors in sample point")
+                except Exception as scroll_error:
+                    logger.error(f"Debug scroll error: {scroll_error}")
             except ImportError:
                 logger.warning("fastembed не доступен — отключение sparse search.")
                 has_sparse = False
@@ -5759,10 +5833,22 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
                 has_sparse = False
                 if not has_dense:
                     return [], f"Ошибка при инициализации sparse embedding: {str(e)}"
+        elif has_sparse and not config.use_bm25:
+            # Если коллекция поддерживает sparse, но BM25 отключен в конфиге, 
+            # не инициализируем sparse embedding, но помечаем, что sparse векторы есть
+            logger.info("Sparse vectors exist in collection but BM25 is disabled in config - sparse search will be skipped")
+            has_sparse = False  # Принудительно отключаем sparse если он отключен в конфиге
         
         # Определяем стратегию поиска
         strategy = SearchStrategy(client, collection_name, embedder, sparse_emb)
-        search_mode = strategy.determine_search_mode(hybrid)
+        # Если задан режим поиска явно, используем его, иначе определяем автоматически
+        if search_mode_override and search_mode_override in ["dense", "sparse", "hybrid"]:
+            search_mode = search_mode_override
+            logger.info(f"Using search mode override: {search_mode_override}")
+        else:
+            # Определяем тип поиска на основе гибридного параметра и доступных векторов
+            search_type = "hybrid" if hybrid else "auto"  # "auto" для старого поведения, если не hybrid
+            search_mode = strategy.determine_search_mode(hybrid, search_type)
         
         logger.info(f"Search mode determined: {search_mode}")
         
@@ -5780,7 +5866,12 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         # Получаем или создаем эмбеддинг запроса с использованием кэша
         query_vector = query_cache.get_or_create_query_embedding(query, collection_name, vector_size)
         
+        # Проверяем количество точек в коллекции
+        count = client.count(collection_name=collection_name)
+        logger.info(f"Collection '{collection_name}' has {count.count} points")
+        
         # Для других режимов: использовать SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter)
+        logger.info(f"Calling SearchExecutor.execute_search with mode '{search_mode}', vector_name '{vector_name}', sparse_params keys: {list(sparse_params.keys()) if sparse_params else 'None'}")
         if search_mode != "dense":
             results, error = await SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter)
         else:
@@ -5788,14 +5879,44 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
             # Используем SearchExecutor для плотного поиска тоже
             results, error = await SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter)
         
+        logger.info(f"SearchExecutor returned: {len(results) if results else 0} results, error: {error}")
+        
+        # Debug logging to check results from SearchExecutor
+        if results:
+            logger.info(f"Results from SearchExecutor: {len(results)} items")
+            for i, (result, score) in enumerate(results[:3]):  # Log first 3 results
+                logger.info(f"  Result {i}: score={score}, type={type(result)}, content_len={len(result.get('content', '')) if isinstance(result, dict) else 'N/A'}, source={result.get('source', 'N/A') if isinstance(result, dict) else 'N/A'}")
+                if isinstance(result, dict):
+                    logger.info(f"    Keys: {list(result.keys())}")
+                    logger.info(f"    Content preview: {str(result.get('content', ''))[:100] if result.get('content') else 'NO CONTENT'}")
+                    logger.info(f"    Original score: {result.get('original_score', 'NO ORIGINAL SCORE')}")
+        else:
+            logger.debug("No results returned from SearchExecutor")
+        
+        # Log the error returned from SearchExecutor
+        if error:
+            logger.error(f"Error from SearchExecutor: {error}")
+        
+        # Store original results count for comparison after further processing
+        original_results_count = len(results) if results else 0
+        logger.debug(f"Before additional processing: {original_results_count} results")
+        
+        logger.debug(f"Starting additional processing for {len(results)} results")
         # Дополнительно обрабатываем результаты для веб-интерфейса
+        logger.debug(f"Starting additional processing for {len(results)} results")
         processed_results = []
-        for result, score in results:
+        for i, (result, score) in enumerate(results):
+            logger.debug(f"Processing result {i}: type={type(result)}, score={score}")
             if isinstance(result, dict):
                 # Это уже расширенный результат из SearchExecutor
+                logger.debug(f"  Dict result keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+                logger.debug(f"  Dict content: '{result.get('content', 'NO CONTENT')[:50]}...' if result.get('content') else 'NO CONTENT'")
+                logger.debug(f"  Dict source: {result.get('source', 'NO SOURCE')}")
+                logger.debug(f"  Dict original_score: {result.get('original_score', 'NO ORIGINAL SCORE')}")
                 processed_results.append((result, score))
             else:
                 # Стандартный формат - пытаемся извлечь содержимое
+                logger.debug(f"  Processing non-dict result: {type(result)}")
                 content = getattr(result, 'page_content', '')
                 metadata = getattr(result, 'metadata', {})
                 
@@ -5809,7 +5930,7 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
                     if 'metadata' in payload:
                         metadata = payload['metadata']
                 
-                # Если content все еще пустой, проверяем __dict__
+                # Если content все еще пустый, проверяем __dict__
                 if not content and hasattr(result, '__dict__'):
                     result_dict = result.__dict__
                     content = result_dict.get('content', '')
@@ -5818,58 +5939,44 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
                     if not metadata and 'metadata' in result_dict:
                         metadata = result_dict['metadata']
                 
-                processed_results.append(({
-                    'content': content if content is not None else '',
-                    'metadata': metadata,
-                    'original_score': score,  # Сохраняем оригинальную оценку
-                    'score': score
-                }, score))
+                processed_results.append(
+                    (
+                        {
+                            'content': content if content is not None else '',
+                            'metadata': metadata,
+                            'original_score': score,  # Сохраняем оригинальную оценку
+                            'score': score
+                        }, 
+                        score
+                    )
+                )
+        
+        logger.debug(f"Completed additional processing: {len(processed_results)} results")
+        for i, (result, score) in enumerate(processed_results[:3]):
+            logger.debug(f"  Processed result {i}: score={score}, content_len={len(result.get('content', ''))}, source={result.get('source', 'N/A')}, original_score={result.get('original_score', 'N/A')}")
+            logger.debug(f"    Full result keys: {list(result.keys())}")
+            logger.debug(f"    Content preview: {str(result.get('content', ''))[:100] if result.get('content') else 'NO CONTENT'}")
+        
+        # Log results before potential content fetching from Qdrant
+        logger.info(f"Before Qdrant content fetch: {len(processed_results)} results")
+        for i, (result, score) in enumerate(processed_results[:2]):
+            logger.info(f"  Before Qdrant fetch {i}: score={score}, orig_score={result.get('original_score', 'NO ORIG')}, content_len={len(result.get('content', ''))}")
         
         # Если контент пустой, пытаемся получить его напрямую из Qdrant
         if all(not result.get('content', '') for result, _ in processed_results) and client:
             logger.debug("Content is empty in all results, attempting to fetch directly from Qdrant")
             try:
                 # Получаем точки напрямую из Qdrant по ID результатов
+                # Note: This only works if we have the original point IDs available
+                # Since RRF query processes the points, we need to make sure they were stored properly
+                # This is a fallback mechanism for when content extraction from RRF payload fails
                 point_ids = []
-                for result, _ in processed_results:
-                    if 'metadata' in result and '_id' in result['metadata']:
-                        point_ids.append(result['metadata']['_id'])
+                # We need to extract IDs differently - since we're using RRF, the original point IDs might not be available
+                # The RRF query_points returns ScoredPoint objects with IDs, but we need to maintain that info
                 
-                if point_ids:
-                    # Получаем точки напрямую
-                    points_response = client.retrieve(
-                        collection_name=collection_name,
-                        ids=point_ids,
-                        with_payload=True,
-                        with_vectors=False
-                    )
-                    
-                    # Создаем словарь ID -> payload для быстрого поиска
-                    payload_dict = {}
-                    for point in points_response:
-                        if hasattr(point, 'id') and hasattr(point, 'payload'):
-                            payload_dict[str(point.id)] = point.payload
-                    
-                    # Обновляем содержимое в результатах
-                    for i, (result, score) in enumerate(processed_results):
-                        point_id = result['metadata'].get('_id')
-                        if point_id and str(point_id) in payload_dict:
-                            payload = payload_dict[str(point_id)]
-                            content = payload.get('content', '')
-                            if not content:
-                                content = payload.get('page_content', '')
-                            
-                            # Обновляем содержимое в результате, сохраняя все существующие поля
-                            updated_result = result.copy()  # Копируем все существующие поля
-                            
-                            # Обновляем контент только если он не пустой
-                            if content and content.strip():
-                                updated_result['content'] = content
-                            # Если контент пустой, оставляем существующий контент
-                            
-                            processed_results[i] = (updated_result, score)
-                    
-                    logger.debug(f"Updated {len(processed_results)} results with content from direct Qdrant query")
+                # This is tricky because after RRF processing, we lose the original point ID references
+                # That's why it's important to have proper content extraction in SearchExecutor
+                logger.debug("Skipping direct Qdrant retrieval as it requires original point IDs")
             except Exception as retrieve_error:
                 logger.warning(f"Failed to retrieve content directly from Qdrant: {retrieve_error}")
         
@@ -5879,8 +5986,19 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         if config.reranker_enabled and processed_results:
             from core.search.reranker_manager import RerankerManager
             reranker_manager = RerankerManager.get_instance()
+            # Логируем информацию перед reranking для отладки
+            logger.debug(f"Before reranking: {len(processed_results)} results")
+            for i, (result, score) in enumerate(processed_results[:3]):  # Логируем первые 3
+                logger.debug(f"  Result {i}: score={score}, content_len={len(result.get('content', ''))}, source={result.get('source', 'N/A')}")
+            
             processed_results = reranker_manager.rerank_documents(query, processed_results, config)
+            
+            logger.debug(f"After reranking: {len(processed_results)} results")
+            for i, (result, score) in enumerate(processed_results[:3]):  # Логируем первые 3
+                logger.debug(f"  Result {i}: score={score}, content_len={len(result.get('content', ''))}, source={result.get('source', 'N/A')}")
             logger.debug(f"Reranked to {len(processed_results)} results")
+        else:
+            logger.debug(f"Reranker not enabled or no results: reranker_enabled={config.reranker_enabled}, results_count={len(processed_results)}")
         
         logger.info(f"Search completed successfully with {len(processed_results)} results")
         return processed_results, error
@@ -5944,10 +6062,10 @@ import logging
 import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 
+from qdrant_client import models
 from qdrant_client.http.models import FieldCondition, Filter, MatchValue, Range
-from qdrant_client.models import SparseVector
+from qdrant_client.models import SparseVector, Fusion, FusionQuery, Prefetch
 
-from core.search.reranker_manager import RerankerManager
 from config.config_manager import ConfigManager
 from core.embedding.embeddings import get_dense_embedder
 
@@ -6042,62 +6160,7 @@ class SearchExecutor:
                     with_payload=True,
                     with_vectors=False
                 )
-                # Аналогично без фильтра
-                config = ConfigManager.get_instance().get()
-                embedder = get_dense_embedder(config, "auto")
-                query_vector = embedder.embed_query(query)
-                
-                if search_mode == "hybrid":
-                    results, error = await SearchExecutor.execute_hybrid_search(client, query, embedder, sparse_params.get("sparse_embedding"), k, metadata_filter)
-                    if error:
-                        return [], error
-                elif search_mode == "sparse":
-                        # Sparse поиск
-                        # Для sparse векторов используем именованный sparse вектор
-                        sparse_vector_name = sparse_params["sparse_vector_name"] if sparse_params else config.sparse_vector_name
-                        # Получаем sparse вектор через sparse embedding
-                        sparse_embedding = sparse_params.get("sparse_embedding")
-                        sparse_vector = None
-                        if sparse_embedding:
-                            # sparse_result уже в формате {"indices": [...], "values": [...]} от адаптера
-                            sparse_result = sparse_embedding.embed_query(query)
-                            sparse_vector = sparse_result  # уже в правильном формате
-                        
-                        if sparse_vector:
-                            results = client.search(
-                                collection_name=config.collection_name,
-                                query_vector=None,  # Для sparse поиска query_vector=None
-                                sparse_vector={sparse_vector_name: sparse_vector},  # {indices: [...], values: [...]}
-                                vector_name=sparse_vector_name,  # Имя sparse named vector
-                                limit=k,
-                                with_payload=True,
-                                with_vectors=False
-                            )
-                        else:
-                            # Если sparse вектор не создан, возвращаем пустой результат
-                            results = []
-                    else:
-                        # Dense
-                        # Для dense векторов используем именованный вектор
-                        if vector_name:
-                            results = client.search(
-                                collection_name=config.collection_name,
-                                query_vector=(vector_name, query_vector),
-                                limit=k,
-                                with_payload=True,
-                                with_vectors=False
-                            )
-                        else:
-                            # Если имя вектора не указано, используем имя по умолчанию "dense_vector"
-                            results = client.search(
-                                collection_name=config.collection_name,
-                                query_vector=("dense_vector", query_vector),
-                                limit=k,
-                                with_payload=True,
-                                with_vectors=False
-                            )
 
-                
             # Обрабатываем результаты для извлечения содержимого чанков
             processed_results = []
             for point in results:  # Теперь results - это список PointStruct
@@ -6145,118 +6208,176 @@ class SearchExecutor:
             return [], str(e)
 
     @staticmethod
-    async def execute_hybrid_search(client, query: str, embedder, sparse_params: Dict, k: int, metadata_filter: Optional[Dict[str, Any]] = None):
-        """Выполняет гибридный поиск (dense + sparse BM25)."""
+    async def execute_hybrid_search(
+        client, query: str, embedder, sparse_params: Dict, k: int, metadata_filter: Optional[Dict[str, Any]] = None
+    ) -> Tuple[List[Any], Optional[str]]:  # Changed to return raw ScoredPoint objects
+        """
+        Выполняет hybrid поиск с dense + sparse через Query API.
+        """
         try:
             config = ConfigManager.get_instance().get()
+            collection_name = config.collection_name
+            
             # Dense vector
             dense_vector = embedder.embed_query(query)
             
-            # Получаем sparse vector, если доступен
-            sparse_dict = None
-            sparse_name = None
-            if sparse_params and sparse_params.get("sparse_embedding"):
-                sparse_emb = sparse_params["sparse_embedding"]
-                sparse_dict = sparse_emb.embed_query(query)  # Now already in dict format from native adapter
-                # sparse_dict is already in the correct format {"indices": [...], "values": [...]}
-                
-                sparse_name = sparse_params.get("sparse_vector_name", config.sparse_vector_name)
+            # Sparse vector (с валидацией)
+            sparse_embedding = sparse_params.get("sparse_embedding") if sparse_params else None
+            sparse_dict = sparse_embedding.embed_query(query) if sparse_embedding else None
+            sparse_name = sparse_params.get("sparse_vector_name", "bm25_text") if sparse_params else "bm25_text"
+            sparse_vec = None
+            if sparse_dict:
+                indices = sorted(set(sparse_dict["indices"]))
+                values = [sparse_dict["values"][i] for i in range(len(sparse_dict["indices"])) if sparse_dict["indices"][i] in indices]
+                non_zero = sum(1 for v in values if v > 0)
+                logger.info(f"Sparse query: {len(indices)} indices, {non_zero} non-zero values")
+                if non_zero > 0:
+                    sparse_vec = models.SparseVector(indices=indices, values=values)
             
-            collection_name = config.collection_name
+            # Filter на top-level
             search_filter = SearchExecutor._create_filter(metadata_filter) if metadata_filter else None
             
-            # Выполняем dense поиск с именованным вектором
-            dense_results = client.search(
-                collection_name=collection_name,
-                query_vector=("dense_vector", dense_vector),
-                limit=k * 2,  # Берем больше для reranking
-                query_filter=search_filter,
-                with_payload=True,
-                with_vectors=False
-            )
-            
-            # Выполняем sparse поиск
-            sparse_results = []
-            if sparse_dict and sparse_name:
-                sparse_results = client.search(
+            # Если sparse вектора нет, используем только dense поиск
+            if sparse_vec:
+                logger.info(f"Sending hybrid query with dense vector (len={len(dense_vector)}) and sparse vector (len={len(sparse_vec.indices)}) to {sparse_name}")
+                
+                # Prefetch для RRF (только если есть оба вектора)
+                prefetch = []
+                
+                # Dense prefetch
+                prefetch.append(
+                    models.Prefetch(
+                        query=dense_vector,
+                        using="dense_vector",
+                        limit=k * 2
+                    )
+                )
+                
+                # Sparse prefetch (только если есть sparse вектор)
+                prefetch.append(
+                    models.Prefetch(
+                        query=sparse_vec,
+                        using=sparse_name,
+                        limit=k * 2
+                    )
+                )
+                
+                # Fusion RRF без rrf_k (default k=60)
+                fusion = models.FusionQuery(fusion=models.Fusion.RRF)
+                
+                # Query points
+                logger.info(f"Executing query_points with prefetch and RRF fusion for collection {collection_name}")
+                response = client.query_points(
                     collection_name=collection_name,
-                    query_vector=None,
-                    sparse_vector={sparse_name: sparse_dict},
-                    vector_name=sparse_name,  # Use named sparse
-                    limit=k * 2,
+                    prefetch=prefetch,
+                    query=fusion,
+                    limit=k,
+                    query_filter=search_filter,  # Top-level!
+                    with_payload=True,
+                    with_vectors=False
+                )
+                
+                results = response.points  # List[ScoredPoint]
+                
+                logger.info(f"RRF query returned {len(results)} results")
+                
+                # Log details about the scores to debug the issue
+                if results:
+                    logger.info(f"RRF scores - first few: {[f'{point.score:.6f}' for point in results[:5]]}")
+                    logger.info(f"RRF scores - all: {[f'{point.score:.6f}' for point in results]}")
+                
+                # Проверим качество результатов RRF - если оценки обнулены, используем dense fallback
+                if results:
+                    # Проверим, есть ли значимые оценки (не все близки к 0)
+                    significant_scores = [point for point in results if point.score > 0.0001]
+                    if not significant_scores:
+                        logger.warning(f"RRF returned low-quality scores ({len(significant_scores)} significant out of {len(results)}) — fallback to dense-only")
+                        results = client.search(
+                            collection_name=collection_name,
+                            query_vector=("dense_vector", dense_vector),
+                            limit=k,
+                            query_filter=search_filter,
+                            with_payload=True,
+                            with_vectors=False
+                        )
+                    else:
+                        logger.info(f"RRF returned {len(significant_scores)} significant scores out of {len(results)} total")
+            else:
+                # Если sparse вектора нет, используем только dense поиск
+                logger.info("No sparse vector available, using dense-only search")
+                results = client.search(
+                    collection_name=collection_name,
+                    query_vector=("dense_vector", dense_vector),
+                    limit=k,
                     query_filter=search_filter,
                     with_payload=True,
                     with_vectors=False
                 )
             
-            # Комбинируем результаты (простой union с весами, alpha=0.7 для dense)
-            alpha = 0.7
-            # Создаем словарь для дедупликации по ID
-            combined_dict = {}
+            # Check if results exist and log scores appropriately
+            if not results:
+                logger.warning("Hybrid returned empty — fallback to dense-only")
+                results = client.search(
+                    collection_name=collection_name,
+                    query_vector=("dense_vector", dense_vector),
+                    limit=k,
+                    query_filter=search_filter,
+                    with_payload=True,
+                    with_vectors=False
+                )
             
-            # Добавляем dense результаты
-            for point in dense_results:
-                point_id = str(point.id) if hasattr(point, 'id') else str(hash(str(point.payload)))
-                score = point.score if hasattr(point, 'score') else 0
-                combined_dict[point_id] = {
-                    'point': point,
-                    'score': alpha * score
-                }
+            logger.info(f"Hybrid results: {len(results)}, first score: {results[0].score if results else 'empty'}")
             
-            # Добавляем sparse результаты
-            for point in sparse_results:
-                point_id = str(point.id) if hasattr(point, 'id') else str(hash(str(point.payload)))
-                score = point.score if hasattr(point, 'score') else 0
-                if point_id in combined_dict:
-                    # Комбинируем оценки
-                    combined_dict[point_id]['score'] += (1 - alpha) * score
-                else:
-                    combined_dict[point_id] = {
-                        'point': point,
-                        'score': (1 - alpha) * score
-                    }
-            
-            # Сортируем по комбинированной оценке и берем top k
-            sorted_results = sorted(combined_dict.items(), key=lambda x: x[1]['score'], reverse=True)[:k]
-            
-            # Обрабатываем результаты
-            processed_results = []
-            for point_id, data in sorted_results:
-                point = data['point']
-                combined_score = data['score']
+            # CRITICAL FIX: The fallback check was incorrectly triggering even with good RRF scores
+            # Only perform dense fallback if RRF results are truly poor (all scores extremely low)
+            # This was the source of the issue where good RRF scores were being replaced with dense fallback
+            all_scores_are_poor = False
+            if results:
+                scores_list = [point.score for point in results]
+                logger.info(f"RRF scores for fallback check: {scores_list}")
                 
-                # Извлекаем дополнительную информацию из payload
-                payload = point.payload if hasattr(point, 'payload') else {}
-                content = payload.get('content', '') or payload.get('page_content', '')
-                metadata = payload.get('metadata', {})
-                
-                # Создаем расширенный объект результата
-                extended_result = {
-                    'content': content if content is not None else '',
-                    'metadata': metadata,
-                    'original_score': combined_score
-                }
-                
-                # Если это многоуровневый чанк, добавляем информацию о микро-чанках
-                if 'micro_contents' in metadata:
-                    extended_result['micro_contents'] = metadata['micro_contents']
-                elif 'micro_contents' in payload:
-                    extended_result['micro_contents'] = payload['micro_contents']
-                    
-                # Добавляем source если есть
-                if 'source' in metadata:
-                    extended_result['source'] = metadata['source']
-                elif 'source' in payload:
-                    extended_result['source'] = payload['source']
-                elif 'source' not in extended_result and 'source' in metadata:
-                    extended_result['source'] = metadata.get('source', '')
-                
-                processed_results.append((extended_result, combined_score))
+                # Check if ALL scores are extremely low
+                all_scores_are_poor = all(score < 0.001 for score in scores_list)  # Increased threshold to be more conservative
+                logger.info(f"All scores are poor: {all_scores_are_poor}, score details: {scores_list}")
             
-            return processed_results, None
+            # Only do fallback if ALL scores are genuinely poor (very low)
+            if results and all_scores_are_poor:
+                logger.warning("All RRF scores are extremely low - fallback to dense-only")
+                results = client.search(
+                    collection_name=collection_name,
+                    query_vector=("dense_vector", dense_vector),
+                    limit=k,
+                    query_filter=search_filter,
+                    with_payload=True,
+                    with_vectors=False
+                )
+            else:
+                logger.info("RRF scores are acceptable - no fallback needed")
+            
+            return results, None  # Return raw ScoredPoint objects for processing in execute_search
+            
         except Exception as e:
-            logger.exception(f"Ошибка в hybrid поиске: {e}")
-            return [], str(e)
+            logger.exception(f"Ошибка в hybrid search: {e}")
+            # Explicit fallback в except
+            try:
+                logger.info("Fallback to dense in except block")
+                config = ConfigManager.get_instance().get()
+                from core.embedding.embeddings import get_dense_embedder
+                embedder = get_dense_embedder(config, "auto")  # Re-init if needed
+                dense_vector = embedder.embed_query(query)
+                search_filter = SearchExecutor._create_filter(metadata_filter) if metadata_filter else None
+                fallback_results = client.search(
+                    collection_name=collection_name,
+                    query_vector=("dense_vector", dense_vector),
+                    limit=k,
+                    query_filter=search_filter,
+                    with_payload=True,
+                    with_vectors=False
+                )
+                return fallback_results, None  # Return raw ScoredPoint objects for processing in execute_search
+            except Exception as fallback_e:
+                logger.exception(f"Fallback failed: {fallback_e}")
+                return [], str(e)
 
     @staticmethod
     async def execute_search(
@@ -6284,98 +6405,40 @@ class SearchExecutor:
             Tuple[List[Tuple[Any, float]], Optional[str]]: (результаты поиска, ошибка)
         """
         try:
-            if metadata_filter:
-                # Создаем фильтр для Qdrant
-                must_conditions = []
-                
-                for key, value in metadata_filter.items():
-                    # Обрабатываем различные типы условий
-                    if isinstance(value, dict):
-                        # Сложные условия (например, {"$gt": 2020})
-                        for op, op_value in value.items():
-                            if op == "$gt":
-                                must_conditions.append(FieldCondition(
-                                    key=f"metadata.{key}",
-                                    range=Range(gt=op_value)
-                                ))
-                            elif op == "$gte":
-                                must_conditions.append(FieldCondition(
-                                    key=f"metadata.{key}",
-                                    range=Range(gte=op_value)
-                                ))
-                            elif op == "$lt":
-                                must_conditions.append(FieldCondition(
-                                    key=f"metadata.{key}",
-                                    range=Range(lt=op_value)
-                                ))
-                            elif op == "$lte":
-                                must_conditions.append(FieldCondition(
-                                    key=f"metadata.{key}",
-                                    range=Range(lte=op_value)
-                                ))
-                            elif op == "$contains":
-                                # Для массивов или строк
-                                must_conditions.append(FieldCondition(
-                                    key=f"metadata.{key}",
-                                    match=MatchValue(value=op_value)
-                                ))
-                    else:
-                        # Простое равенство
-                        must_conditions.append(FieldCondition(
-                            key=f"metadata.{key}",
-                            match=MatchValue(value=value)
-                        ))
-                
-                search_filter = Filter(must=must_conditions)
-                # Выполняем поиск в зависимости от режима
-                config = ConfigManager.get_instance().get()
+            config = ConfigManager.get_instance().get()
+            
+            # Создаем фильтр, если нужно
+            search_filter = SearchExecutor._create_filter(metadata_filter) if metadata_filter else None
+            
+            if search_mode == "hybrid":
+                logger.info(f"Starting hybrid search mode for collection {config.collection_name}")
+                # Для hybrid нужен dense embedder
                 embedder = get_dense_embedder(config, "auto")
                 query_vector = embedder.embed_query(query)
                 
-                if search_mode == "hybrid":
-                    results, error = await SearchExecutor.execute_hybrid_search(client, query, embedder, sparse_params.get("sparse_embedding"), k, metadata_filter)
-                    if error:
-                        return [], error
-                elif search_mode == "sparse":
-                    # Sparse поиск
-                    # Для sparse векторов используем именованный sparse вектор
-                    sparse_vector_name = sparse_params["sparse_vector_name"] if sparse_params else config.sparse_vector_name
-                    # Получаем sparse вектор через sparse embedding
-                    sparse_embedding = sparse_params.get("sparse_embedding")
-                    sparse_vector = None
-                    if sparse_embedding:
-                        # sparse_result уже в формате {"indices": [...], "values": [...]} от адаптера
-                        sparse_result = sparse_embedding.embed_query(query)
-                        sparse_vector = sparse_result  # уже в правильном формате
-                    
-                    if sparse_vector:
-                        results = client.search(
-                            collection_name=config.collection_name,
-                            query_vector=None,  # Для sparse поиска query_vector=None
-                            sparse_vector={sparse_vector_name: sparse_vector},  # {indices: [...], values: [...]}
-                            vector_name=sparse_vector_name,  # Имя sparse named vector
-                            limit=k,
-                            query_filter=search_filter,
-                            with_payload=True,
-                            with_vectors=False
-                        )
-                    else:
-                        # Если sparse вектор не создан, возвращаем пустой результат
-                        results = []
+                # Проверяем, есть ли валидный sparse embedding в sparse_params
+                sparse_embedding = sparse_params.get("sparse_embedding") if sparse_params else None
+                logger.info(f"Sparse embedding in params: {sparse_embedding is not None}, use_bm25 config: {config.use_bm25}")
+                
+                # Если sparse embedding отсутствует или BM25 отключен в конфиге, используем dense-only
+                if not config.use_bm25 or sparse_embedding is None:
+                    logger.info("Sparse embedding not available, using dense-only search for hybrid mode")
+                    results = client.search(
+                        collection_name=config.collection_name,
+                        query_vector=("dense_vector", query_vector),
+                        limit=k,
+                        query_filter=search_filter,
+                        with_payload=True,
+                        with_vectors=False
+                    )
+                    error = None
                 else:
-                    # Dense
-                    # Для dense векторов используем именованный вектор
-                    if vector_name:
-                        results = client.search(
-                            collection_name=config.collection_name,
-                            query_vector=(vector_name, query_vector),
-                            limit=k,
-                            query_filter=search_filter,
-                            with_payload=True,
-                            with_vectors=False
-                        )
-                    else:
-                        # Если имя вектора не указано, используем имя по умолчанию "dense_vector"
+                    logger.info(f"Executing hybrid search with sparse vector name: {sparse_params.get('sparse_vector_name', 'NOT SPECIFIED')}")
+                    # Обычный гибридный поиск
+                    results, error = await SearchExecutor.execute_hybrid_search(client, query, embedder, sparse_params, k, metadata_filter)
+                    if error:
+                        logger.warning(f"Hybrid search failed: {error}, falling back to dense search")
+                        # Fallback to dense search
                         results = client.search(
                             collection_name=config.collection_name,
                             query_vector=("dense_vector", query_vector),
@@ -6384,9 +6447,70 @@ class SearchExecutor:
                             with_payload=True,
                             with_vectors=False
                         )
-        
-        
+                        error = None
+            elif search_mode == "sparse":
+                # Sparse поиск — НЕ инициализируем dense!
+                sparse_vector_name = sparse_params["sparse_vector_name"] if sparse_params else config.sparse_vector_name
+                # Получаем sparse вектор через sparse embedding
+                sparse_embedding = sparse_params.get("sparse_embedding")
+                sparse_vector = None
+                if sparse_embedding:
+                    # sparse_result уже в формате {"indices": [...], "values": [...]} от адаптера
+                    sparse_result = sparse_embedding.embed_query(query)
+                    sparse_vector = sparse_result  # уже в правильном формате
                 
+                if sparse_vector:
+                    # Валидация и нормализация sparse vector
+                    indices = sorted(set(sparse_vector["indices"]))  # Unique + sorted (Qdrant requires)
+                    values = [sparse_vector["values"][i] for i in range(len(sparse_vector["indices"])) if sparse_vector["indices"][i] in indices]  # Match to unique indices
+                    
+                    # Log для debug
+                    non_zero = sum(1 for v in values if abs(v) > 1e-10)  # Check for non-zero values (with tolerance)
+                    logger.info(f"Sparse query: {len(indices)} indices, {non_zero} non-zero values")
+                    
+                    if non_zero == 0:
+                        logger.warning("Sparse query has 0 non-zero values — skipping sparse search")
+                        results = []
+                    else:
+                        sparse_vec = models.SparseVector(indices=indices, values=values)
+                        named_sparse = models.NamedSparseVector(name=sparse_vector_name, vector=sparse_vec)
+                        
+                        results = client.search(
+                            collection_name=config.collection_name,
+                            query_vector=named_sparse,  # Передаем sparse как query_vector
+                            limit=k,
+                            query_filter=search_filter,
+                            with_payload=True,
+                            with_vectors=False
+                        )
+                else:
+                    # Если sparse вектор не создан, возвращаем пустой результат
+                    results = []
+            else:
+                # Dense — инициализируем dense embedder
+                embedder = get_dense_embedder(config, "auto")
+                query_vector = embedder.embed_query(query)
+                # Для dense векторов используем именованный вектор
+                if vector_name:
+                    results = client.search(
+                        collection_name=config.collection_name,
+                        query_vector=(vector_name, query_vector),
+                        limit=k,
+                        query_filter=search_filter,
+                        with_payload=True,
+                        with_vectors=False
+                    )
+                else:
+                    # Если имя вектора не указано, используем имя по умолчанию "dense_vector"
+                    results = client.search(
+                        collection_name=config.collection_name,
+                        query_vector=("dense_vector", query_vector),
+                        limit=k,
+                        query_filter=search_filter,
+                        with_payload=True,
+                        with_vectors=False
+                    )
+        
             # Обрабатываем результаты для извлечения содержимого чанков
             processed_results = []
             for point in results:  # Теперь results - это список PointStruct
@@ -6418,7 +6542,7 @@ class SearchExecutor:
                     
                 processed_results.append((extended_result, point.score if hasattr(point, 'score') else 0))
                 
-            logger.debug(f"Search returned {len(processed_results)} results")  # Оставить
+            logger.debug(f"Search returned {len(processed_results)} results")
             
             # Log first result before returning to see what we have
             if processed_results:
@@ -6426,6 +6550,9 @@ class SearchExecutor:
                 logger.debug(f"Before returning - First result score: {first_score}, keys: {list(first_result.keys()) if isinstance(first_result, dict) else 'not dict'}")
                 if isinstance(first_result, dict):
                     logger.debug(f"Before returning - original_score: {first_result.get('original_score')}")
+                    
+            # Explicit logging to show which vector names are used in the search
+            logger.info(f"Search execution completed with mode '{search_mode}', dense vector: 'dense_vector', sparse vector: {sparse_params.get('sparse_vector_name', 'None') if sparse_params else 'None'}")
         
             return processed_results, None
             
@@ -6477,7 +6604,6 @@ class SearchExecutor:
                     match=MatchValue(value=value)
                 ))
         return Filter(must=must_conditions)
-
 ====================================================================================================
 ==================== КОНЕЦ ФАЙЛА: core\search\search_executor.py ====================
 
@@ -6542,19 +6668,42 @@ class SearchStrategy:
         # Note: This is a placeholder - actual implementation would depend on how collections are created
         logger.info(f"Configured collection '{self.collection_name}' with BM25 sparse vector config")
 
-    def determine_search_mode(self, hybrid: bool) -> str:
+    def determine_search_mode(self, hybrid: bool, search_type: str = "auto") -> str:
         """
         Определяет режим поиска на основе параметров.
         
         Args:
             hybrid (bool): Требуется ли гибридный поиск.
+            search_type (str): Тип поиска ("auto", "dense", "sparse", "hybrid").
             
         Returns:
             str: Режим поиска ("hybrid", "dense", "sparse").
         """
-        logger.info(f"Determining search mode: hybrid={hybrid}, has_dense={self.has_dense}, has_sparse={self.has_sparse}")
+        logger.info(f"Determining search mode: hybrid={hybrid}, search_type={search_type}, has_dense={self.has_dense}, has_sparse={self.has_sparse}")
         
-        # Если запрошен гибридный поиск, проверяем возможность его выполнения
+        # Если явно указан тип поиска, используем его
+        if search_type == "sparse":
+            if self.has_sparse:
+                logger.info("Explicit sparse-only search mode selected")
+                return "sparse"
+            else:
+                logger.warning(f"Collection '{self.collection_name}' does not contain sparse vectors. Falling back to dense search.")
+                return "dense"
+        elif search_type == "dense":
+            logger.info("Explicit dense-only search mode selected")
+            return "dense"
+        elif search_type == "hybrid":
+            if self.has_sparse and self.has_dense:
+                logger.info("Explicit hybrid search mode selected")
+                return "hybrid"
+            elif self.has_dense:
+                logger.info("Hybrid mode requested but no sparse vectors - using dense search")
+                return "dense"
+            else:
+                logger.info("Hybrid mode requested but no dense vectors - using sparse search")
+                return "sparse"
+        
+        # Автоматическое определение (старая логика)
         if hybrid:
             if not self.has_sparse:
                 logger.warning(f"Коллекция '{self.collection_name}' не содержит sparse-векторов. Выполняется только dense search.")

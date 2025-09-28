@@ -63,10 +63,44 @@ class CollectionAnalyzer:
                         sparse_vector_names = list(sparse_vectors.keys())
                         if sparse_vector_names:
                             sparse_vector_name = sparse_vector_names[0]  # Берем первое имя
+                            logger.info(f"Detected sparse vector name: {sparse_vector_name}")
                         else:
                             sparse_vector_name = sparse_name or "sparse_vector"
+                            logger.info(f"Using provided sparse vector name: {sparse_vector_name}")
                     else:
-                        sparse_vector_name = sparse_name or "sparse_vector"
+                        # Try to detect the sparse vector name from the collection info more thoroughly
+                        try:
+                            # Check if there are any sparse vectors in the collection's points structure
+                            points_sample = client.scroll(
+                                collection_name=collection_name,
+                                limit=1,
+                                with_payload=False,
+                                with_vectors=True
+                            )
+                            if points_sample[0] if isinstance(points_sample, list) and len(points_sample) > 0 else False:
+                                point = points_sample[0]
+                                if hasattr(point, 'vector') and isinstance(point.vector, dict):
+                                    vector_names = list(point.vector.keys())
+                                    sparse_candidates = [name for name in vector_names if 'sparse' in name.lower() or 'bm25' in name.lower()]
+                                    if sparse_candidates:
+                                        sparse_vector_name = sparse_candidates[0]
+                                        has_sparse = True
+                                        logger.info(f"Detected sparse vector name from point vectors: {sparse_vector_name}")
+                                    else:
+                                        # Fallback to checking if 'bm25_text' exists
+                                        if 'bm25_text' in vector_names:
+                                            sparse_vector_name = 'bm25_text'
+                                            has_sparse = True
+                                            logger.info(f"Found 'bm25_text' sparse vector: {sparse_vector_name}")
+                                        else:
+                                            sparse_vector_name = sparse_name or "sparse_vector"
+                                            logger.info(f"Using provided/fallback sparse vector name: {sparse_vector_name}")
+                                else:
+                                    sparse_vector_name = sparse_name or "sparse_vector"
+                                    logger.info(f"Using provided/fallback sparse vector name: {sparse_vector_name}")
+                        except Exception as e:
+                            logger.debug(f"Could not detect sparse vector names from points: {e}")
+                            sparse_vector_name = sparse_name or "sparse_vector"
                         
                     logger.debug(f"Analysis result: has_dense={has_dense}, has_sparse={has_sparse}, sparse_vector_name={sparse_vector_name}")
                 else:

@@ -476,6 +476,28 @@ def update_advanced_settings(form_data: dict, config: Config):
             config.mineru_subprocess_timeout = int(form_data["mineru_subprocess_timeout"])
         except ValueError:
             raise HTTPException(400, detail="Неверный таймаут subprocess вызова mineru")
+    
+    # Настройки RAG
+    config.rag_enabled = "rag_enabled" in form_data
+    if form_data.get("rag_model_path") is not None:
+        config.rag_model_path = form_data["rag_model_path"].strip()
+    if form_data.get("rag_system_prompt") is not None:
+        config.rag_system_prompt = form_data["rag_system_prompt"].strip()
+    if form_data.get("rag_top_k") is not None:
+        try:
+            config.rag_top_k = int(form_data["rag_top_k"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное количество топ-K результатов для RAG")
+    if form_data.get("rag_max_tokens") is not None:
+        try:
+            config.rag_max_tokens = int(form_data["rag_max_tokens"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное максимальное количество токенов для RAG")
+    if form_data.get("rag_temperature") is not None:
+        try:
+            config.rag_temperature = float(form_data["rag_temperature"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверная температура генерации для RAG")
 
 
 async def verify_admin_access_from_form(request: Request, credentials: HTTPBasicCredentials = Depends(security)):

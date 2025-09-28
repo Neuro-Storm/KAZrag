@@ -181,6 +181,15 @@ class ConfigManager:
                 config.use_bm25 = updates['use_bm25']
                 config.sparse_vector_name = updates.get('sparse_vector_name', config.sparse_vector_name)
             
+            # Validate new RAG fields
+            if any(key in updates for key in ['rag_enabled', 'rag_model_path', 'rag_system_prompt', 'rag_top_k', 'rag_max_tokens', 'rag_temperature']):
+                config.rag_enabled = updates.get('rag_enabled', config.rag_enabled)
+                config.rag_model_path = updates.get('rag_model_path', config.rag_model_path)
+                config.rag_system_prompt = updates.get('rag_system_prompt', config.rag_system_prompt)
+                config.rag_top_k = updates.get('rag_top_k', config.rag_top_k)
+                config.rag_max_tokens = updates.get('rag_max_tokens', config.rag_max_tokens)
+                config.rag_temperature = updates.get('rag_temperature', config.rag_temperature)
+            
             # Create new config object
             updated_config = Config(**config_dict)
             

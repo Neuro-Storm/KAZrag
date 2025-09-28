@@ -228,6 +228,10 @@
                  :class="{ 'active': activeTab === 'reranker' }"
                  @click="activeTab = 'reranker'"
                  data-module="reranker">Reranker</div>
+            <div class="module-tab" 
+                 :class="{ 'active': activeTab === 'rag' }"
+                 @click="activeTab = 'rag'"
+                 data-module="rag">RAG</div>
         </div>
         
         <!-- Indexing Module -->
@@ -855,6 +859,64 @@
                     <button type="submit" :disabled="isProcessing">Сохранить настройки reranker</button>
                     <div class="progress" x-show="isProcessing">
                         <span class="spinner"></span> Сохранение настроек reranker...
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- RAG Module -->
+        <div id="rag-module" class="module-content" x-show="activeTab === 'rag'">
+            <div class="module-card">
+                <h3>Настройки RAG (Retrieval Augmented Generation)</h3>
+                <p>Включите RAG для автоматической генерации ответов на базе результатов поиска с использованием LLM.</p>
+                
+                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="rag" @submit="submitSettingsForm">
+                    <input type="hidden" name="action" value="save_advanced_settings">
+                    <input type="hidden" name="active_tab" value="rag">
+                    
+                    <div style="margin-bottom: 1rem;">
+                        <input type="checkbox" id="rag_enabled" name="rag_enabled" value="True" 
+                               {% if config.rag_enabled %}checked{% endif %}>
+                        <label for="rag_enabled">Включить RAG</label>
+                    </div>
+                    
+                    <label for="rag_model_path">Путь к модели LLM (GGUF, в ./models/)</label>
+                    <input type="text" id="rag_model_path" name="rag_model_path" value="{{ config.rag_model_path }}" required>
+                    
+                    <label for="rag_system_prompt">Системный промпт</label>
+                    <textarea id="rag_system_prompt" name="rag_system_prompt" rows="3" style="width: 100%;">{{ config.rag_system_prompt }}</textarea>
+                    
+                    <div class="grid-2col">
+                        <div>
+                            <label for="rag_top_k">Топ-K результатов для контекста</label>
+                            <input type="number" id="rag_top_k" name="rag_top_k" value="{{ config.rag_top_k }}" min="1" max="10" required>
+                        </div>
+                        <div>
+                            <label for="rag_max_tokens">Макс. токенов в ответе</label>
+                            <input type="number" id="rag_max_tokens" name="rag_max_tokens" value="{{ config.rag_max_tokens }}" min="1" required>
+                        </div>
+                    </div>
+                    
+                    <div class="grid-2col">
+                        <div>
+                            <label for="rag_temperature">Температура генерации</label>
+                            <input type="number" id="rag_temperature" name="rag_temperature" value="{{ config.rag_temperature }}" min="0" max="1" step="0.1" required>
+                        </div>
+                        <div></div>  <!-- Пустой для выравнивания -->
+                    </div>
+                    
+                    <div class="form-info">
+                        <p><strong>Советы:</strong></p>
+                        <ul>
+                            <li>Скачайте GGUF-модель (например, qwen3-4b.gguf) и поместите в ./models/.</li>
+                            <li>Первая загрузка модели займёт время (кэшируется).</li>
+                            <li>RAG работает только если модель доступна.</li>
+                        </ul>
+                    </div>
+                    
+                    <button type="submit" :disabled="isProcessing">Сохранить настройки RAG</button>
+                    <div class="progress" x-show="isProcessing">
+                        <span class="spinner"></span> Сохранение настроек RAG...
                     </div>
                 </form>
             </div>

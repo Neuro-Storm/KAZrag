@@ -1,3 +1,17 @@
+{% if config.rag_enabled and rag_response %}
+    <div class="rag-response" style="margin-top: 2rem; padding: 1rem; background-color: #e8f4fd; border-left: 4px solid #2196F3; border-radius: 4px;">
+        <h3>Ответ ассистента (RAG):</h3>
+        <p>{{ rag_response | safe }}</p>
+        <details>
+            <summary>Подробнее: использованный контекст (топ-{{ config.rag_top_k }} результатов)</summary>
+            <ul>
+                {% for result, score in results[:config.rag_top_k] %}
+                    <li><strong>{{ result.metadata.source if result.metadata else 'N/A' }}</strong>: {{ result.content[:200] }}...</li>
+                {% endfor %}
+            </ul>
+        </details>
+    </div>
+{% endif %}
 {% if results %}
     <h2>Результаты поиска ({{ results|length }}):</h2>
     {% for result, score in results %}

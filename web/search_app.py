@@ -162,6 +162,21 @@ async def handle_search(
             template_context["error"] = error
         else:
             logger.info(f"[{request_id}] Search completed successfully with {len(results)} results")
+            
+            # Генерация RAG-ответа, если включено
+            rag_response = None
+            logger.info(f"[{request_id}] RAG enabled: {config.rag_enabled}, number of results: {len(results) if results else 0}")
+            if config.rag_enabled and results:
+                from core.search.searcher import generate_rag_response
+                rag_response = generate_rag_response(query, results, config)
+                logger.info(f"[{request_id}] RAG response generated: {rag_response is not None}, length: {len(rag_response) if rag_response else 0}")
+                template_context["rag_response"] = rag_response
+            else:
+                logger.info(f"[{request_id}] RAG skipped - enabled: {config.rag_enabled}, has results: {bool(results)}")
+
+        # В любом случае добавляем конфиг в контекст (если его еще нет)
+        if "config" not in template_context:
+            template_context["config"] = config
         
         # Проверяем, является ли запрос AJAX запросом
         is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
@@ -186,6 +201,7 @@ async def handle_search(
             "collections": collections,
             "selected_collection": collection,
             "query": query,
-            "error": "Произошла ошибка при выполнении поиска"
+            "error": "Произошла ошибка при выполнении поиска",
+            "config": config
         }
         return get_templates().TemplateResponse("index.html", template_context)

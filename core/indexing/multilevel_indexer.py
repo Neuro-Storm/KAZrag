@@ -384,7 +384,8 @@ class MultiLevelIndexer:
             combined_dict = {}
             
             # Добавляем dense результаты (с коэффициентом alpha)
-            alpha = 0.7  # Вес для dense результатов (повышенный вес для семантики)
+            config = ConfigManager.get_instance().get()
+            alpha = getattr(config, "hybrid_alpha", 0.7)  # Вес для dense результатов (повышенный вес для семантики)
             for result in dense_results:
                 result_id = result.id
                 combined_dict[result_id] = {

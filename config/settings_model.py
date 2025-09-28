@@ -104,6 +104,7 @@ class Config(BaseSettings):
     # Настройки поиска
     search_default_k: int = Field(default=5, ge=1)  # Минимум 1 результат
     use_hybrid: bool = False  # Использовать гибридный поиск (dense + sparse)
+    hybrid_alpha: float = Field(default=0.7, ge=0.0, le=1.0)  # Вес для dense в гибридном поиске
     
     # BM25 Native Sparse Configuration
     use_bm25: bool = True  # Enable native BM25 via sparse vectors with IDF
@@ -135,6 +136,14 @@ class Config(BaseSettings):
     
     # Токен HuggingFace для приватных моделей
     huggingface_token: Optional[str] = Field(default=None, exclude=True)
+
+    # Настройки RAG
+    rag_enabled: bool = False  # Включить RAG (Retrieval + Generation)
+    rag_model_path: str = "models/Qwen3-4B-Instruct-2507-Q8_0.gguf"  # Путь к GGUF-модели LLM (относительно корня проекта)
+    rag_system_prompt: str = "You are a helpful assistant. Use the following context to answer the user's question accurately."  # Системный промпт
+    rag_top_k: int = Field(default=3, ge=1, le=10)  # Количество топ-результатов для контекста (1-10)
+    rag_max_tokens: int = Field(default=512, ge=1)  # Максимум токенов в генерации
+    rag_temperature: float = Field(default=0.7, ge=0.0, le=1.0)  # Температура генерации
 
     def save_to_file(self, file_path: Optional[str] = None) -> None:
         """Сохранить конфигурацию в JSON файл.

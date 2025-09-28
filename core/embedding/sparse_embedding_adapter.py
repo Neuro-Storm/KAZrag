@@ -1,6 +1,7 @@
 """Адаптер для разреженных эмбеддингов с native BM25."""
 
 import logging
+import re
 from collections import Counter
 from typing import Dict, List, Tuple, Any
 
@@ -33,8 +34,9 @@ class SparseEmbeddingAdapter:
         """
         sparse_vectors = []
         for text in texts:
-            # Simple tokenization (adapt to config.bm25_tokenizer)
-            tokens = text.lower().split()  # Word tokenizer
+            # Advanced tokenization to better match Qdrant native BM25
+            # Use more sophisticated tokenization similar to what Qdrant uses
+            tokens = self._tokenize_text(text)
             tokens = [t for t in tokens if len(t) >= self.config.bm25_min_token_len]
             
             # TF weights (frequency)
@@ -52,6 +54,20 @@ class SparseEmbeddingAdapter:
         
         logger.debug(f"Generated {len(sparse_vectors)} sparse vectors for BM25")
         return sparse_vectors
+
+    def _tokenize_text(self, text: str) -> List[str]:
+        """
+        Advanced tokenization that better matches Qdrant native BM25.
+        Qdrant typically uses word-level tokenization with some normalization.
+        """
+        # Convert to lowercase
+        text = text.lower()
+        
+        # Use regex to find word-like tokens (letters, numbers, and hyphens within words)
+        # This should better match the Qdrant native tokenization
+        tokens = re.findall(r'\b\w+(?:-\w+)*\b', text)
+        
+        return tokens
 
     def embed_query(self, query: str) -> Dict[str, Any]:
         """Single query embedding."""

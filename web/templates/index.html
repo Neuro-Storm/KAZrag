@@ -232,6 +232,30 @@
             {% if error %}
                 <p style="color: red;">Ошибка: {{ error }}</p>
             {% endif %}
+            <!-- Отладочная информация для RAG -->
+            <!--
+            <p>DEBUG: config.rag_enabled={{ config.rag_enabled }}, rag_response exists={{ rag_response is not none }}, rag_response length={{ rag_response|length if rag_response else 0 }}</p>
+            -->
+            {% if config.rag_enabled and rag_response %}
+                <div class="rag-response" style="margin-top: 2rem; padding: 1rem; background-color: #e8f4fd; border-left: 4px solid #2196F3; border-radius: 4px;">
+                    <h3>Ответ ассистента (RAG):</h3>
+                    <p>{{ rag_response | safe }}</p>
+                    <details>
+                        <summary>Подробнее: использованный контекст (топ-{{ config.rag_top_k }} результатов)</summary>
+                        <ul>
+                            {% for result, score in results[:config.rag_top_k] %}
+                                <li><strong>{{ result.metadata.source if result.metadata else 'N/A' }}</strong>: {{ result.content[:200] }}...</li>
+                            {% endfor %}
+                        </ul>
+                    </details>
+                </div>
+            {% elif config.rag_enabled and not rag_response %}
+                <!-- Отладка: RAG включен, но ответ пустой -->
+                <!-- <p>DEBUG: RAG enabled but response is empty or None</p> -->
+            {% elif not config.rag_enabled %}
+                <!-- Отладка: RAG отключен -->
+                <!-- <p>DEBUG: RAG is disabled</p> -->
+            {% endif %}
         </div>
     </main>
     <script src="/static/ajax.js"></script>
