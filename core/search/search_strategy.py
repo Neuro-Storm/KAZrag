@@ -54,19 +54,42 @@ class SearchStrategy:
         # Note: This is a placeholder - actual implementation would depend on how collections are created
         logger.info(f"Configured collection '{self.collection_name}' with BM25 sparse vector config")
 
-    def determine_search_mode(self, hybrid: bool) -> str:
+    def determine_search_mode(self, hybrid: bool, search_type: str = "auto") -> str:
         """
         Определяет режим поиска на основе параметров.
         
         Args:
             hybrid (bool): Требуется ли гибридный поиск.
+            search_type (str): Тип поиска ("auto", "dense", "sparse", "hybrid").
             
         Returns:
             str: Режим поиска ("hybrid", "dense", "sparse").
         """
-        logger.info(f"Determining search mode: hybrid={hybrid}, has_dense={self.has_dense}, has_sparse={self.has_sparse}")
+        logger.info(f"Determining search mode: hybrid={hybrid}, search_type={search_type}, has_dense={self.has_dense}, has_sparse={self.has_sparse}")
         
-        # Если запрошен гибридный поиск, проверяем возможность его выполнения
+        # Если явно указан тип поиска, используем его
+        if search_type == "sparse":
+            if self.has_sparse:
+                logger.info("Explicit sparse-only search mode selected")
+                return "sparse"
+            else:
+                logger.warning(f"Collection '{self.collection_name}' does not contain sparse vectors. Falling back to dense search.")
+                return "dense"
+        elif search_type == "dense":
+            logger.info("Explicit dense-only search mode selected")
+            return "dense"
+        elif search_type == "hybrid":
+            if self.has_sparse and self.has_dense:
+                logger.info("Explicit hybrid search mode selected")
+                return "hybrid"
+            elif self.has_dense:
+                logger.info("Hybrid mode requested but no sparse vectors - using dense search")
+                return "dense"
+            else:
+                logger.info("Hybrid mode requested but no dense vectors - using sparse search")
+                return "sparse"
+        
+        # Автоматическое определение (старая логика)
         if hybrid:
             if not self.has_sparse:
                 logger.warning(f"Коллекция '{self.collection_name}' не содержит sparse-векторов. Выполняется только dense search.")

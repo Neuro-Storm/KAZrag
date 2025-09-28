@@ -122,8 +122,16 @@ async def handle_search(
         if not use_reranker:
             config.reranker_enabled = False
         
-        results, error = await search_in_collection(query, collection, search_device, k, hybrid=hybrid, 
-                                                  metadata_filter=metadata_filter_dict, client=client)
+        # Определяем режим поиска - если это sparse или hybrid, используем override
+        search_mode_override = None
+        if search_type in ["dense", "sparse", "hybrid"]:
+            search_mode_override = search_type
+
+        results, error = await search_in_collection(query, collection, search_device, k, 
+                                                  hybrid=hybrid, 
+                                                  search_mode_override=search_mode_override,
+                                                  metadata_filter=metadata_filter_dict, 
+                                                  client=client)
         
         # Восстанавливаем оригинальную настройку reranker
         config.reranker_enabled = original_reranker_enabled
