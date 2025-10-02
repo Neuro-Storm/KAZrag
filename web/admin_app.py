@@ -717,7 +717,9 @@ async def run_indexing(request: Request, background_tasks: BackgroundTasks, user
     logger.info(f"[{request_id}] Run indexing request by user: {username}")
     
     try:
-        background_tasks.add_task(run_indexing_logic, client=client)
+        # Use the synchronous wrapper for the indexing logic
+        from core.indexing.indexer import run_indexing_logic_sync
+        background_tasks.add_task(run_indexing_logic_sync, client=client)
         logger.info(f"[{request_id}] Indexing task scheduled successfully")
         
         # Проверяем, является ли запрос AJAX запросом
@@ -755,11 +757,15 @@ async def process_files_endpoint(request: Request, background_tasks: BackgroundT
     try:
         # Запускаем обработку файлов в фоновом режиме
         config = config_manager.get()
-        background_tasks.add_task(
-            convert_files_to_md,
-            input_dir=config.mineru_input_pdf_dir,
-            output_dir=config.mineru_output_md_dir
-        )
+        
+        # Create a sync wrapper function to run the potentially long-running task
+        def run_convert_files_sync():
+            convert_files_to_md(
+                input_dir=config.mineru_input_pdf_dir,
+                output_dir=config.mineru_output_md_dir
+            )
+        
+        background_tasks.add_task(run_convert_files_sync)
         logger.info(f"[{request_id}] Multi-format processing task scheduled successfully")
         
         # Проверяем, является ли запрос AJAX запросом

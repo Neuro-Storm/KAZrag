@@ -1,6 +1,8 @@
 """Module for centralized embedding management."""
 
+import asyncio
 import logging
+import threading
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 
@@ -40,6 +42,7 @@ class EmbeddingManager:
     def __init__(self):
         """Initialize EmbeddingManager."""
         self._embedder_cache: OrderedDict = OrderedDict()
+        self._lock = threading.Lock()  # Синхронный лок для синхронизации доступа к кэшу
         
     @classmethod
     def get_instance(cls) -> 'EmbeddingManager':
@@ -130,6 +133,24 @@ class EmbeddingManager:
             # Если указан токен HuggingFace, добавляем его в model_kwargs
             if config.huggingface_token:
                 model_kwargs["token"] = config.huggingface_token
+            
+            # Проверяем, содержит ли модель имя, которое требует trust_remote_code
+            models_requiring_trust = [
+                "ai-sage/giga-embeddings-instruct",
+                "ai-sage/giga-embeddings",
+                "giga-embeddings",
+                "giga-embeddings-instruct",
+                "jina-ai/jina-embeddings-v3",
+                "mixedbread-ai/mxbai-embed-large-v1",
+                "nomic-ai/nomic-embed-text-v1",
+                "nomic-ai/nomic-embed-text-v1.5",
+                "nomic-ai/nomic-embed-text-v1.5-f16"
+            ]
+            model_lower = model_name.lower()
+            
+            if any(model_to_trust in model_lower for model_to_trust in models_requiring_trust):
+                model_kwargs["trust_remote_code"] = True
+                logger.info(f"Включено trust_remote_code для модели {model_name}")
 
             # Если модель не найдена в кеше или batch_size изменился, создаем новую
             embedder = HuggingFaceEmbeddings(

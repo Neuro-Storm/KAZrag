@@ -161,7 +161,7 @@ class Indexer:
             logger.info(f"Creating hybrid Qdrant collection '{self.config.collection_name}' with dense and sparse embeddings")
             # Удаляем существующую коллекцию, если она есть
             try:
-                self.client.delete_collection(self.config.collection_name)
+                client.delete_collection(self.config.collection_name)
             except Exception:
                 pass  # Коллекция не существует или ошибка при удалении
             
@@ -180,7 +180,7 @@ class Indexer:
             logger.info(f"Creating sparse-only Qdrant collection '{self.config.collection_name}' using native BM25 sparse embeddings")
             # Удаляем существующую коллекцию, если она есть
             try:
-                self.client.delete_collection(self.config.collection_name)
+                client.delete_collection(self.config.collection_name)
             except Exception:
                 pass  # Коллекция не существует или ошибка при удалении
             
@@ -199,7 +199,7 @@ class Indexer:
             logger.info(f"Creating dense-only Qdrant collection '{self.config.collection_name}'")
             # Удаляем существующую коллекцию, если она есть
             try:
-                self.client.delete_collection(self.config.collection_name)
+                client.delete_collection(self.config.collection_name)
             except Exception:
                 pass  # Коллекция не существует или ошибка при удалении
             
@@ -265,7 +265,7 @@ class Indexer:
                     if self.index_hybrid and self.sparse_emb:
                         # Удаляем существующую коллекцию, если она есть
                         try:
-                            self.client.delete_collection(self.config.collection_name)
+                            client.delete_collection(self.config.collection_name)
                         except Exception:
                             pass  # Коллекция не существует или ошибка при удалении
                         
@@ -283,7 +283,7 @@ class Indexer:
                     elif self.index_bm25 and self.sparse_emb and not self.index_dense:
                         # Удаляем существующую коллекцию, если она есть
                         try:
-                            self.client.delete_collection(self.config.collection_name)
+                            client.delete_collection(self.config.collection_name)
                         except Exception:
                             pass  # Коллекция не существует или ошибка при удалении
                         
@@ -301,7 +301,7 @@ class Indexer:
                     else:
                         # Удаляем существующую коллекцию, если она есть
                         try:
-                            self.client.delete_collection(self.config.collection_name)
+                            client.delete_collection(self.config.collection_name)
                         except Exception:
                             pass  # Коллекция не существует или ошибка при удалении
                         

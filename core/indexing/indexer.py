@@ -80,7 +80,8 @@ async def run_indexing_logic(client=None, pre_chunked_documents=None) -> Tuple[b
                         all_documents.extend(processed_docs)
                     except Exception as e:
                         logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
-                        raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
+                        # Не прерываем индексацию из-за одной ошибки файла
+                        continue
                 
                 # Обрабатываем .md файлы
                 for filepath in folder_path.rglob("*.md"):
@@ -94,17 +95,23 @@ async def run_indexing_logic(client=None, pre_chunked_documents=None) -> Tuple[b
                         logger.info(f"После обработки файла {filepath} всего документов: {len(all_documents)}")
                     except Exception as e:
                         logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
-                        raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
+                        # Не прерываем индексацию из-за одной ошибки файла
+                        continue
                 
                 logger.info(f"Всего собрано документов: {len(all_documents)}")
                 
-                # Индексируем все документы с использованием многоуровневого индексатора
-                # Временно используем синхронный вызов, так как multilevel_indexer.index_documents_multilevel не async
-                stats = multilevel_indexer.index_documents_multilevel(all_documents)
-                logger.info(f"Индексация завершена: {stats}")
+                if len(all_documents) == 0:
+                    return True, "indexed_successfully_no_docs"
                 
-                success = True
-                status = "indexed_successfully"
+                # Индексируем все документы с использованием многоуровневого индексатора
+                try:
+                    stats = multilevel_indexer.index_documents_multilevel(all_documents)
+                    logger.info(f"Индексация завершена: {stats}")
+                    success = True
+                    status = "indexed_successfully"
+                except Exception as e:
+                    logger.exception(f"Ошибка при многоуровневой индексации: {e}")
+                    return False, f"indexing_error: {str(e)}"
             else:
                 # Используем обычный индексатор
                 logger.info("Используется обычный индексатор")
@@ -126,7 +133,8 @@ async def run_indexing_logic(client=None, pre_chunked_documents=None) -> Tuple[b
                         all_documents.extend(processed_chunks)
                     except Exception as e:
                         logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
-                        raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
+                        # Не прерываем индексацию из-за одной ошибки файла
+                        continue
                 
                 # Обрабатываем .md файлы
                 for filepath in folder_path.rglob("*.md"):
@@ -137,21 +145,21 @@ async def run_indexing_logic(client=None, pre_chunked_documents=None) -> Tuple[b
                         all_documents.extend(processed_chunks)
                     except Exception as e:
                         logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
-                        raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
+                        # Не прерываем индексацию из-за одной ошибки файла
+                        continue
                 
                 # Индексируем все документы
                 success, status = await indexer.index_documents(all_documents, client, folder_path_resolved)
         
         # Обновляем конфигурацию (только если не используются предварительно нарезанные документы)
         if success and pre_chunked_documents is None:
-            config.is_indexed = True
+            # Не обновляем config.is_indexed если поле существует (оно могло быть удалено)
+            if hasattr(config, 'is_indexed'):
+                config.is_indexed = True
             config_manager.save(config)
         
         return success, status
         
-    except IndexingError as e:
-        logger.exception(f"Ошибка индексации: {e}")
-        return False, f"indexing_error: {str(e)}"
     except Exception as e:
         logger.exception(f"Неожиданная ошибка при индексации: {e}")
         return False, f"indexing_error: {str(e)}"
@@ -247,3 +255,46 @@ def run_indexing_from_config():
     except Exception as e:
         logger.exception(f"Ошибка при индексации: {e}")
         return False, f"indexing_error: {str(e)}"
+
+
+def run_indexing_logic_sync(client=None, pre_chunked_documents=None):
+    """
+    Синхронная обертка для запуска асинхронной логики индексации.
+    Используется для запуска в фоновых задачах FastAPI.
+    
+    Args:
+        client: Клиент Qdrant (опционально)
+        pre_chunked_documents: Предварительно нарезанные документы (опционально)
+    
+    Returns:
+        Результат выполнения индексации
+    """
+    import sys
+    import asyncio
+    
+    # Проверяем, есть ли уже запущенный event loop
+    try:
+        loop = asyncio.get_running_loop()
+        # Если уже есть запущенный loop, создаем задачу
+        import concurrent.futures
+        import threading
+        
+        def run_in_new_loop():
+            return asyncio.run(run_indexing_logic(client=client, pre_chunked_documents=pre_chunked_documents))
+        
+        # Запускаем в отдельном потоке с новым event loop
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(run_in_new_loop)
+            try:
+                return future.result()
+            except Exception as e:
+                logger.exception(f"Ошибка при выполнении индексации в фоновом потоке: {e}")
+                return False, f"indexing_error: {str(e)}"
+                
+    except RuntimeError:
+        # Нет запущенного loop, можем использовать asyncio.run
+        try:
+            return asyncio.run(run_indexing_logic(client=client, pre_chunked_documents=pre_chunked_documents))
+        except Exception as e:
+            logger.exception(f"Ошибка при выполнении индексации: {e}")
+            return False, f"indexing_error: {str(e)}"
