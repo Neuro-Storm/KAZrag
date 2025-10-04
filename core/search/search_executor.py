@@ -9,7 +9,7 @@ from qdrant_client.http.models import FieldCondition, Filter, MatchValue, Range
 from qdrant_client.models import SparseVector, Fusion, FusionQuery, Prefetch
 
 from config.config_manager import ConfigManager
-from core.embedding.embeddings import get_dense_embedder
+from core.embedding.embeddings import get_dense_embedder, get_search_device
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,8 @@ class SearchExecutor:
         query: str,
         query_vector: List[float],
         k: int, 
-        metadata_filter: Optional[Dict[str, Any]] = None
+        metadata_filter: Optional[Dict[str, Any]] = None,
+        collection_name: str = None
     ) -> Tuple[List[Tuple[Any, float]], Optional[str]]:
         """
         Выполняет поиск с использованием предварительно вычисленного вектора запроса.
@@ -34,12 +35,14 @@ class SearchExecutor:
             query_vector (List[float]): Предварительно вычисленный вектор запроса.
             k (int): Количество результатов.
             metadata_filter (Optional[Dict[str, Any]]): Фильтр по метаданным.
+            collection_name (str): Название коллекции для поиска.
             
         Returns:
             Tuple[List[Tuple[Any, float]], Optional[str]]: (результаты поиска, ошибка)
         """
         try:
-            collection_name = ConfigManager.get_instance().get().collection_name  # Получаем из конфига
+            if collection_name is None:
+                collection_name = ConfigManager.get_instance().get().collection_name  # Получаем из конфига
             # Выполняем поиск с опциональной фильтрацией по метаданным, используя готовый вектор
             if metadata_filter:
                 # Создаем фильтр для Qdrant
@@ -151,14 +154,15 @@ class SearchExecutor:
 
     @staticmethod
     async def execute_hybrid_search(
-        client, query: str, embedder, sparse_params: Dict, k: int, metadata_filter: Optional[Dict[str, Any]] = None
+        client, query: str, embedder, sparse_params: Dict, k: int, metadata_filter: Optional[Dict[str, Any]] = None, collection_name: str = None
     ) -> Tuple[List[Any], Optional[str]]:  # Changed to return raw ScoredPoint objects
         """
         Выполняет hybrid поиск с dense + sparse через Query API.
         """
         try:
             config = ConfigManager.get_instance().get()
-            collection_name = config.collection_name
+            if collection_name is None:
+                collection_name = config.collection_name
             
             # Dense vector
             dense_vector = embedder.embed_query(query)
@@ -304,8 +308,9 @@ class SearchExecutor:
             try:
                 logger.info("Fallback to dense in except block")
                 config = ConfigManager.get_instance().get()
-                from core.embedding.embeddings import get_dense_embedder
-                embedder = get_dense_embedder(config, "auto")  # Re-init if needed
+                from core.embedding.embeddings import get_dense_embedder, get_search_device
+                search_device = get_search_device(None)  # используем дефолтное устройство для поиска
+                embedder = get_dense_embedder(config, search_device)  # Re-init if needed
                 dense_vector = embedder.embed_query(query)
                 search_filter = SearchExecutor._create_filter(metadata_filter) if metadata_filter else None
                 fallback_results = client.search(
@@ -329,7 +334,8 @@ class SearchExecutor:
         sparse_params: Optional[Dict],
         query: str, 
         k: int, 
-        metadata_filter: Optional[Dict[str, Any]] = None
+        metadata_filter: Optional[Dict[str, Any]] = None,
+        collection_name: str = None
     ) -> Tuple[List[Tuple[Any, float]], Optional[str]]:
         """
         Выполняет поиск с опциональной фильтрацией по метаданным.
@@ -342,20 +348,24 @@ class SearchExecutor:
             query (str): Поисковый запрос.
             k (int): Количество результатов.
             metadata_filter (Optional[Dict[str, Any]]): Фильтр по метаданным.
+            collection_name (str): Название коллекции для поиска.
             
         Returns:
             Tuple[List[Tuple[Any, float]], Optional[str]]: (результаты поиска, ошибка)
         """
         try:
             config = ConfigManager.get_instance().get()
+            if collection_name is None:
+                collection_name = config.collection_name
             
             # Создаем фильтр, если нужно
             search_filter = SearchExecutor._create_filter(metadata_filter) if metadata_filter else None
             
             if search_mode == "hybrid":
-                logger.info(f"Starting hybrid search mode for collection {config.collection_name}")
+                logger.info(f"Starting hybrid search mode for collection {collection_name}")
                 # Для hybrid нужен dense embedder
-                embedder = get_dense_embedder(config, "auto")
+                search_device = get_search_device(None)  # используем дефолтное устройство для поиска
+                embedder = get_dense_embedder(config, search_device)
                 query_vector = embedder.embed_query(query)
                 
                 # Проверяем, есть ли валидный sparse embedding в sparse_params
@@ -366,7 +376,7 @@ class SearchExecutor:
                 if not config.use_bm25 or sparse_embedding is None:
                     logger.info("Sparse embedding not available, using dense-only search for hybrid mode")
                     results = client.search(
-                        collection_name=config.collection_name,
+                        collection_name=collection_name,
                         query_vector=("dense_vector", query_vector),
                         limit=k,
                         query_filter=search_filter,
@@ -377,12 +387,12 @@ class SearchExecutor:
                 else:
                     logger.info(f"Executing hybrid search with sparse vector name: {sparse_params.get('sparse_vector_name', 'NOT SPECIFIED')}")
                     # Обычный гибридный поиск
-                    results, error = await SearchExecutor.execute_hybrid_search(client, query, embedder, sparse_params, k, metadata_filter)
+                    results, error = await SearchExecutor.execute_hybrid_search(client, query, embedder, sparse_params, k, metadata_filter, collection_name)
                     if error:
                         logger.warning(f"Hybrid search failed: {error}, falling back to dense search")
                         # Fallback to dense search
                         results = client.search(
-                            collection_name=config.collection_name,
+                            collection_name=collection_name,
                             query_vector=("dense_vector", query_vector),
                             limit=k,
                             query_filter=search_filter,
@@ -418,7 +428,7 @@ class SearchExecutor:
                         named_sparse = models.NamedSparseVector(name=sparse_vector_name, vector=sparse_vec)
                         
                         results = client.search(
-                            collection_name=config.collection_name,
+                            collection_name=collection_name,
                             query_vector=named_sparse,  # Передаем sparse как query_vector
                             limit=k,
                             query_filter=search_filter,
@@ -430,12 +440,13 @@ class SearchExecutor:
                     results = []
             else:
                 # Dense — инициализируем dense embedder
-                embedder = get_dense_embedder(config, "auto")
+                search_device = get_search_device(None)  # используем дефолтное устройство для поиска
+                embedder = get_dense_embedder(config, search_device)
                 query_vector = embedder.embed_query(query)
                 # Для dense векторов используем именованный вектор
                 if vector_name:
                     results = client.search(
-                        collection_name=config.collection_name,
+                        collection_name=collection_name,
                         query_vector=(vector_name, query_vector),
                         limit=k,
                         query_filter=search_filter,
@@ -445,7 +456,7 @@ class SearchExecutor:
                 else:
                     # Если имя вектора не указано, используем имя по умолчанию "dense_vector"
                     results = client.search(
-                        collection_name=config.collection_name,
+                        collection_name=collection_name,
                         query_vector=("dense_vector", query_vector),
                         limit=k,
                         query_filter=search_filter,

@@ -116,19 +116,6 @@ class EmbeddingManager:
             # Подготовка параметров для загрузки модели
             model_kwargs = {"device": device}
             encode_kwargs = {"batch_size": batch_size}
-            # Если используем CUDA, указываем dtype через encode_kwargs для поддерживающих моделей
-            # Убираем torch_dtype для моделей, которые его не поддерживают
-            if device == "cuda":
-                # Добавляем torch_dtype только для моделей, которые это поддерживают
-                # Проверяем по названию модели или по другим критериям
-                unsupported_models = ["qwen", "qwen3", "google/mt5-base", "t5", "mt5"]
-                model_lower = model_name.lower()
-                
-                # Если модель не в списке неподдерживающих, добавляем torch_dtype
-                if not any(unsupported in model_lower for unsupported in unsupported_models):
-                    encode_kwargs["torch_dtype"] = torch.float16
-                else:
-                    logger.debug(f"Модель {model_name} не поддерживает torch_dtype, используем стандартный тип данных")
             
             # Если указан токен HuggingFace, добавляем его в model_kwargs
             if config.huggingface_token:
@@ -152,7 +139,7 @@ class EmbeddingManager:
                 model_kwargs["trust_remote_code"] = True
                 logger.info(f"Включено trust_remote_code для модели {model_name}")
 
-            # Если модель не найдена в кеше или batch_size изменился, создаем новую
+            # Если модель не найдена в кеше или batch_size измнился, создаем новую
             embedder = HuggingFaceEmbeddings(
                 model_name=model_name,
                 model_kwargs=model_kwargs,
@@ -302,3 +289,75 @@ class EmbeddingManager:
         except Exception as e:
             logger.exception(f"Error generating embeddings for texts: {e}")
             raise EmbeddingError(f"Failed to generate embeddings for texts: {e}")
+
+    async def aget_embedder(self, config: Config, device: Optional[str] = None) -> Embeddings:
+        """Получает или создает кэшированный экземпляр эмбеддера (асинхронная версия).
+        
+        Args:
+            config: Configuration object
+            device: Device to use for embeddings (optional)
+            
+        Returns:
+            Embeddings: Embedder instance
+            
+        Raises:
+            EmbeddingError: If there's an error creating the embedder
+        """
+        # Обертка для вызова синхронного метода в отдельном потоке
+        import asyncio
+        import concurrent.futures
+        
+        def run_get_embedder():
+            return self.get_embedder(config, device)
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(run_get_embedder)
+            return await asyncio.get_event_loop().run_in_executor(None, future.result)
+
+    async def aembed_query(self, text: str, config: Config = None, device: Optional[str] = None) -> List[float]:
+        """Асинхронная версия embed_query.
+        
+        Args:
+            text: Текст для эмбеддинга
+            config: Конфигурация (опционально, по умолчанию используется текущая)
+            device: Устройство для эмбеддинга (опционально)
+            
+        Returns:
+            List[float]: Вектор эмбеддинга
+            
+        Raises:
+            EmbeddingError: If there's an error during embedding
+        """
+        import asyncio
+        import concurrent.futures
+        
+        def run_embed_query():
+            return self.embed_query(text, config, device)
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(run_embed_query)
+            return await asyncio.get_event_loop().run_in_executor(None, future.result)
+
+    async def aembed_texts(self, texts: List[str], config: Config = None, device: Optional[str] = None) -> List[List[float]]:
+        """Асинхронная версия embed_texts.
+        
+        Args:
+            texts: Список текстов для эмбеддинга
+            config: Конфигурация (опционально, по умолчанию используется текущая)
+            device: Устройство для эмбеддинга (опционально)
+            
+        Returns:
+            List[List[float]]: Список векторов эмбеддингов
+            
+        Raises:
+            EmbeddingError: If there's an error during embedding
+        """
+        import asyncio
+        import concurrent.futures
+        
+        def run_embed_texts():
+            return self.embed_texts(texts, config, device)
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(run_embed_texts)
+            return await asyncio.get_event_loop().run_in_executor(None, future.result)

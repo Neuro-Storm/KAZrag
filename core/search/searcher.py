@@ -6,7 +6,7 @@ from qdrant_client.http.models import CountResult
 
 from config.config_manager import ConfigManager
 from config.settings import Config
-from core.embedding.embeddings import get_dense_embedder, get_search_device
+from core.embedding.embeddings import get_dense_embedder, aget_dense_embedder, get_search_device
 from core.qdrant.qdrant_client import aget_qdrant_client
 from core.search.collection_analyzer import CollectionAnalyzer
 from core.search.search_executor import SearchExecutor
@@ -48,7 +48,7 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
             
         # Получаем эмбеддер для поиска
         search_device = get_search_device(device)
-        embedder = get_dense_embedder(config, search_device)
+        embedder = await aget_dense_embedder(config, search_device)
         
         # Инициализируем sparse embedding если он нужен
         sparse_emb = None
@@ -137,11 +137,11 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         # Для других режимов: использовать SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter)
         logger.info(f"Calling SearchExecutor.execute_search with mode '{search_mode}', vector_name '{vector_name}', sparse_params keys: {list(sparse_params.keys()) if sparse_params else 'None'}")
         if search_mode != "dense":
-            results, error = await SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter)
+            results, error = await SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter, collection_name)
         else:
             # Выполняем поиск с использованием кэшированного вектора
             # Используем SearchExecutor для плотного поиска тоже
-            results, error = await SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter)
+            results, error = await SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter, collection_name)
         
         logger.info(f"SearchExecutor returned: {len(results) if results else 0} results, error: {error}")
         

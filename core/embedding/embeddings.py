@@ -34,28 +34,13 @@ def get_search_device(search_device_param: str) -> str:
 # --- Кэширование HuggingFaceEmbeddings ---
 def get_dense_embedder(config: Config, device=None):
     """Получает или создает кэшированный экземпляр эмбеддера."""
-    import asyncio
-    try:
-        loop = asyncio.get_running_loop()
-        # Если уже есть запущенный loop, создаем задачу
-        import concurrent.futures
-        import threading
-        
-        def run_get_embedder():
-            return asyncio.run(embedding_manager.get_embedder(config, device))
-        
-        # Выполняем в отдельном потоке с новым event loop
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future = executor.submit(run_get_embedder)
-            return future.result()
-    except RuntimeError:
-        # Нет запущенного loop, можем использовать asyncio.run
-        return asyncio.run(embedding_manager.get_embedder(config, device))
+    # Просто вызываем синхронный метод, т.к. get_embedder теперь синхронный
+    return embedding_manager.get_embedder(config, device)
 
 
 async def aget_dense_embedder(config: Config, device=None):
     """Асинхронная версия получения эмбеддера."""
-    return await embedding_manager.get_embedder(config, device)
+    return await embedding_manager.aget_embedder(config, device)
 
 
 def embed_query_sync(text: str, config: Config = None, device = None):
