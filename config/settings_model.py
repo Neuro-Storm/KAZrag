@@ -144,6 +144,12 @@ class Config(BaseSettings):
     rag_top_k: int = Field(default=3, ge=1, le=10)  # Количество топ-результатов для контекста (1-10)
     rag_max_tokens: int = Field(default=512, ge=1)  # Максимум токенов в генерации
     rag_temperature: float = Field(default=0.7, ge=0.0, le=1.0)  # Температура генерации
+    rag_context_size: int = Field(default=4096, ge=512)  # Размер контекста для модели
+    rag_max_context_length: int = Field(default=2048, ge=256)  # Максимальная длина контекста для RAG (в символах)
+    rag_gpu_layers: int = Field(default=-1, ge=-1)  # Количество слоев для GPU (-1 = все слои)
+    rag_threads: int = Field(default=4, ge=1)  # Количество потоков для генерации
+    rag_batch_size: int = Field(default=512, ge=1)  # Размер батча для обработки
+    rag_beam_size: int = Field(default=1, ge=1)  # Размер beam для генерации
 
     def save_to_file(self, file_path: Optional[str] = None) -> None:
         """Сохранить конфигурацию в JSON файл.

@@ -12,17 +12,32 @@ logger = logging.getLogger(__name__)
 class LlamaService:
     """Сервис для генерации текста с использованием GGUF-модели."""
     
-    def __init__(self, model_path: str, n_ctx: int = 4096, verbose: bool = False):
+    def __init__(self, 
+                 model_path: str, 
+                 n_ctx: int = 4096, 
+                 n_gpu_layers: int = -1,
+                 n_threads: int = 4,
+                 n_batch: int = 512,
+                 n_beams: int = 1,
+                 verbose: bool = False):
         """
         Инициализация сервиса.
         
         Args:
             model_path: Путь к GGUF-модели.
             n_ctx: Размер контекста.
+            n_gpu_layers: Количество слоев для GPU (-1 = все слои)
+            n_threads: Количество потоков
+            n_batch: Размер батча
+            n_beams: Размер beam для генерации
             verbose: Включить verbose-логи.
         """
         self.model_path = Path(model_path)
         self.n_ctx = n_ctx
+        self.n_gpu_layers = n_gpu_layers
+        self.n_threads = n_threads
+        self.n_batch = n_batch
+        self.n_beams = n_beams
         self.verbose = verbose
         self.llm: Optional[Llama] = None
         self._load_model()
@@ -37,10 +52,12 @@ class LlamaService:
             self.llm = Llama(
                 model_path=str(self.model_path),
                 n_ctx=self.n_ctx,
+                n_gpu_layers=self.n_gpu_layers,
+                n_threads=self.n_threads,
+                n_batch=self.n_batch,
                 verbose=self.verbose,
-                n_threads=4,  # Настраиваемо под систему
             )
-            logger.info(f"Модель загружена: {self.model_path}")
+            logger.info(f"Модель загружена: {self.model_path} (context={self.n_ctx}, gpu_layers={self.n_gpu_layers}, threads={self.n_threads})")
         except Exception as e:
             logger.error(f"Ошибка загрузки модели {self.model_path}: {e}")
             self.llm = None
@@ -73,6 +90,23 @@ class LlamaService:
         # Формируем полный промпт
         full_prompt = f"<|system|>\n{system_prompt}\n<|user|>\nContext:\n{context}\n\nQuestion: {user_query}\n<|assistant|>\n"
         
+        # Проверяем длину промпта и обрезаем контекст при необходимости
+        prompt_length = len(full_prompt.encode('utf-8'))
+        max_context_bytes = self.n_ctx * 4  # примерное ограничение (4 байта на токен как грубая оценка)
+        
+        if prompt_length > max_context_bytes:
+            logger.warning(f"Длина промпта ({prompt_length}) превышает ограничение ({max_context_bytes}), обрезаем контекст")
+            # Обрезаем контекст, оставляя место для промпта и ответа
+            available_context_bytes = max_context_bytes - len(f"<|system|>\n{system_prompt}\n<|user|>\n\nQuestion: {user_query}\n<|assistant|>\n".encode('utf-8')) - (max_tokens * 4)
+            
+            if available_context_bytes > 0:
+                # Обрезаем контекст до доступного размера
+                truncated_context = context[:available_context_bytes]
+                full_prompt = f"<|system|>\n{system_prompt}\n<|user|>\nContext:\n{truncated_context}\n\nQuestion: {user_query}\n<|assistant|>\n"
+            else:
+                logger.error("Недостаточно места для контекста даже после обрезки")
+                return None
+        
         try:
             response = self.llm(
                 full_prompt,
@@ -102,5 +136,12 @@ def get_llm_service(config) -> Optional[LlamaService]:
     if _llm_service is None and config.rag_enabled:
         from config.resource_path import resource_path
         model_path = resource_path(config.rag_model_path)
-        _llm_service = LlamaService(str(model_path), config.gguf_model_n_ctx)
+        _llm_service = LlamaService(
+            str(model_path), 
+            n_ctx=config.rag_context_size,
+            n_gpu_layers=config.rag_gpu_layers,
+            n_threads=config.rag_threads,
+            n_batch=config.rag_batch_size,
+            n_beams=config.rag_beam_size
+        )
     return _llm_service

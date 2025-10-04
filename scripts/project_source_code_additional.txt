@@ -786,6 +786,15 @@ class ConfigManager:
                 config.use_bm25 = updates['use_bm25']
                 config.sparse_vector_name = updates.get('sparse_vector_name', config.sparse_vector_name)
             
+            # Validate new RAG fields
+            if any(key in updates for key in ['rag_enabled', 'rag_model_path', 'rag_system_prompt', 'rag_top_k', 'rag_max_tokens', 'rag_temperature']):
+                config.rag_enabled = updates.get('rag_enabled', config.rag_enabled)
+                config.rag_model_path = updates.get('rag_model_path', config.rag_model_path)
+                config.rag_system_prompt = updates.get('rag_system_prompt', config.rag_system_prompt)
+                config.rag_top_k = updates.get('rag_top_k', config.rag_top_k)
+                config.rag_max_tokens = updates.get('rag_max_tokens', config.rag_max_tokens)
+                config.rag_temperature = updates.get('rag_temperature', config.rag_temperature)
+            
             # Create new config object
             updated_config = Config(**config_dict)
             
@@ -1111,6 +1120,14 @@ class Config(BaseSettings):
     
     # Токен HuggingFace для приватных моделей
     huggingface_token: Optional[str] = Field(default=None, exclude=True)
+
+    # Настройки RAG
+    rag_enabled: bool = False  # Включить RAG (Retrieval + Generation)
+    rag_model_path: str = "models/Qwen3-4B-Instruct-2507-Q8_0.gguf"  # Путь к GGUF-модели LLM (относительно корня проекта)
+    rag_system_prompt: str = "You are a helpful assistant. Use the following context to answer the user's question accurately."  # Системный промпт
+    rag_top_k: int = Field(default=3, ge=1, le=10)  # Количество топ-результатов для контекста (1-10)
+    rag_max_tokens: int = Field(default=512, ge=1)  # Максимум токенов в генерации
+    rag_temperature: float = Field(default=0.7, ge=0.0, le=1.0)  # Температура генерации
 
     def save_to_file(self, file_path: Optional[str] = None) -> None:
         """Сохранить конфигурацию в JSON файл.
@@ -2094,6 +2111,7 @@ def process_pdfs_and_chunk(
 """Модуль для управления векторизаторами (эмбеддерами)."""
 
 import logging
+from typing import List, Optional
 
 from config.settings import Config
 from core.embedding.embedding_manager import EmbeddingManager
@@ -2126,7 +2144,23 @@ def get_search_device(search_device_param: str) -> str:
 # --- Кэширование HuggingFaceEmbeddings ---
 def get_dense_embedder(config: Config, device=None):
     """Получает или создает кэшированный экземпляр эмбеддера."""
+    # Просто вызываем синхронный метод, т.к. get_embedder теперь синхронный
     return embedding_manager.get_embedder(config, device)
+
+
+async def aget_dense_embedder(config: Config, device=None):
+    """Асинхронная версия получения эмбеддера."""
+    return await embedding_manager.aget_embedder(config, device)
+
+
+def embed_query_sync(text: str, config: Config = None, device = None):
+    """Синхронная версия embed_query для использования в синхронных контекстах."""
+    return embedding_manager.embed_query(text, config, device)
+
+
+def embed_texts_sync(texts: List[str], config: Config = None, device = None):
+    """Синхронная версия embed_texts для использования в синхронных контекстах."""
+    return embedding_manager.embed_texts(texts, config, device)
 
 
 def clear_embedder_cache():
@@ -2142,7 +2176,9 @@ def clear_embedder_cache():
 ====================================================================================================
 """Module for centralized embedding management."""
 
+import asyncio
 import logging
+import threading
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 
@@ -2182,6 +2218,7 @@ class EmbeddingManager:
     def __init__(self):
         """Initialize EmbeddingManager."""
         self._embedder_cache: OrderedDict = OrderedDict()
+        self._lock = threading.Lock()  # Синхронный лок для синхронизации доступа к кэшу
         
     @classmethod
     def get_instance(cls) -> 'EmbeddingManager':
@@ -2255,7 +2292,30 @@ class EmbeddingManager:
             # Подготовка параметров для загрузки модели
             model_kwargs = {"device": device}
             encode_kwargs = {"batch_size": batch_size}
-            # Если используем CUDA, указываем dtype через encode_kwargs для поддерживающих моделей
+            
+            # Если указан токен HuggingFace, добавляем его в model_kwargs
+            if config.huggingface_token:
+                model_kwargs["token"] = config.huggingface_token
+            
+            # Проверяем, содержит ли модель имя, которое требует trust_remote_code
+            models_requiring_trust = [
+                "ai-sage/giga-embeddings-instruct",
+                "ai-sage/giga-embeddings",
+                "giga-embeddings",
+                "giga-embeddings-instruct",
+                "jina-ai/jina-embeddings-v3",
+                "mixedbread-ai/mxbai-embed-large-v1",
+                "nomic-ai/nomic-embed-text-v1",
+                "nomic-ai/nomic-embed-text-v1.5",
+                "nomic-ai/nomic-embed-text-v1.5-f16"
+            ]
+            model_lower = model_name.lower()
+            
+            if any(model_to_trust in model_lower for model_to_trust in models_requiring_trust):
+                model_kwargs["trust_remote_code"] = True
+                logger.info(f"Включено trust_remote_code для модели {model_name}")
+
+            # Если используем CUDA, указываем dtype через model_kwargs для поддерживающих моделей
             # Убираем torch_dtype для моделей, которые его не поддерживают
             if device == "cuda":
                 # Добавляем torch_dtype только для моделей, которые это поддерживают
@@ -2265,15 +2325,11 @@ class EmbeddingManager:
                 
                 # Если модель не в списке неподдерживающих, добавляем torch_dtype
                 if not any(unsupported in model_lower for unsupported in unsupported_models):
-                    encode_kwargs["torch_dtype"] = torch.float16
+                    model_kwargs["torch_dtype"] = torch.float16
                 else:
                     logger.debug(f"Модель {model_name} не поддерживает torch_dtype, используем стандартный тип данных")
-            
-            # Если указан токен HuggingFace, добавляем его в model_kwargs
-            if config.huggingface_token:
-                model_kwargs["token"] = config.huggingface_token
 
-            # Если модель не найдена в кеше или batch_size изменился, создаем новую
+            # Если модель не найдена в кеше или batch_size измнился, создаем новую
             embedder = HuggingFaceEmbeddings(
                 model_name=model_name,
                 model_kwargs=model_kwargs,
@@ -2423,6 +2479,78 @@ class EmbeddingManager:
         except Exception as e:
             logger.exception(f"Error generating embeddings for texts: {e}")
             raise EmbeddingError(f"Failed to generate embeddings for texts: {e}")
+
+    async def aget_embedder(self, config: Config, device: Optional[str] = None) -> Embeddings:
+        """Получает или создает кэшированный экземпляр эмбеддера (асинхронная версия).
+        
+        Args:
+            config: Configuration object
+            device: Device to use for embeddings (optional)
+            
+        Returns:
+            Embeddings: Embedder instance
+            
+        Raises:
+            EmbeddingError: If there's an error creating the embedder
+        """
+        # Обертка для вызова синхронного метода в отдельном потоке
+        import asyncio
+        import concurrent.futures
+        
+        def run_get_embedder():
+            return self.get_embedder(config, device)
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(run_get_embedder)
+            return await asyncio.get_event_loop().run_in_executor(None, future.result)
+
+    async def aembed_query(self, text: str, config: Config = None, device: Optional[str] = None) -> List[float]:
+        """Асинхронная версия embed_query.
+        
+        Args:
+            text: Текст для эмбеддинга
+            config: Конфигурация (опционально, по умолчанию используется текущая)
+            device: Устройство для эмбеддинга (опционально)
+            
+        Returns:
+            List[float]: Вектор эмбеддинга
+            
+        Raises:
+            EmbeddingError: If there's an error during embedding
+        """
+        import asyncio
+        import concurrent.futures
+        
+        def run_embed_query():
+            return self.embed_query(text, config, device)
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(run_embed_query)
+            return await asyncio.get_event_loop().run_in_executor(None, future.result)
+
+    async def aembed_texts(self, texts: List[str], config: Config = None, device: Optional[str] = None) -> List[List[float]]:
+        """Асинхронная версия embed_texts.
+        
+        Args:
+            texts: Список текстов для эмбеддинга
+            config: Конфигурация (опционально, по умолчанию используется текущая)
+            device: Устройство для эмбеддинга (опционально)
+            
+        Returns:
+            List[List[float]]: Список векторов эмбеддингов
+            
+        Raises:
+            EmbeddingError: If there's an error during embedding
+        """
+        import asyncio
+        import concurrent.futures
+        
+        def run_embed_texts():
+            return self.embed_texts(texts, config, device)
+        
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(run_embed_texts)
+            return await asyncio.get_event_loop().run_in_executor(None, future.result)
 ====================================================================================================
 ==================== КОНЕЦ ФАЙЛА: core\embedding\embedding_manager.py ====================
 
@@ -2952,7 +3080,8 @@ async def run_indexing_logic(client=None, pre_chunked_documents=None) -> Tuple[b
                         all_documents.extend(processed_docs)
                     except Exception as e:
                         logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
-                        raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
+                        # Не прерываем индексацию из-за одной ошибки файла
+                        continue
                 
                 # Обрабатываем .md файлы
                 for filepath in folder_path.rglob("*.md"):
@@ -2966,17 +3095,23 @@ async def run_indexing_logic(client=None, pre_chunked_documents=None) -> Tuple[b
                         logger.info(f"После обработки файла {filepath} всего документов: {len(all_documents)}")
                     except Exception as e:
                         logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
-                        raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
+                        # Не прерываем индексацию из-за одной ошибки файла
+                        continue
                 
                 logger.info(f"Всего собрано документов: {len(all_documents)}")
                 
-                # Индексируем все документы с использованием многоуровневого индексатора
-                # Временно используем синхронный вызов, так как multilevel_indexer.index_documents_multilevel не async
-                stats = multilevel_indexer.index_documents_multilevel(all_documents)
-                logger.info(f"Индексация завершена: {stats}")
+                if len(all_documents) == 0:
+                    return True, "indexed_successfully_no_docs"
                 
-                success = True
-                status = "indexed_successfully"
+                # Индексируем все документы с использованием многоуровневого индексатора
+                try:
+                    stats = multilevel_indexer.index_documents_multilevel(all_documents)
+                    logger.info(f"Индексация завершена: {stats}")
+                    success = True
+                    status = "indexed_successfully"
+                except Exception as e:
+                    logger.exception(f"Ошибка при многоуровневой индексации: {e}")
+                    return False, f"indexing_error: {str(e)}"
             else:
                 # Используем обычный индексатор
                 logger.info("Используется обычный индексатор")
@@ -2998,7 +3133,8 @@ async def run_indexing_logic(client=None, pre_chunked_documents=None) -> Tuple[b
                         all_documents.extend(processed_chunks)
                     except Exception as e:
                         logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
-                        raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
+                        # Не прерываем индексацию из-за одной ошибки файла
+                        continue
                 
                 # Обрабатываем .md файлы
                 for filepath in folder_path.rglob("*.md"):
@@ -3009,21 +3145,21 @@ async def run_indexing_logic(client=None, pre_chunked_documents=None) -> Tuple[b
                         all_documents.extend(processed_chunks)
                     except Exception as e:
                         logger.exception(f"Ошибка при обработке файла {filepath}: {e}")
-                        raise IndexingError(f"Ошибка при обработке файла {filepath}: {e}")
+                        # Не прерываем индексацию из-за одной ошибки файла
+                        continue
                 
                 # Индексируем все документы
                 success, status = await indexer.index_documents(all_documents, client, folder_path_resolved)
         
         # Обновляем конфигурацию (только если не используются предварительно нарезанные документы)
         if success and pre_chunked_documents is None:
-            config.is_indexed = True
+            # Не обновляем config.is_indexed если поле существует (оно могло быть удалено)
+            if hasattr(config, 'is_indexed'):
+                config.is_indexed = True
             config_manager.save(config)
         
         return success, status
         
-    except IndexingError as e:
-        logger.exception(f"Ошибка индексации: {e}")
-        return False, f"indexing_error: {str(e)}"
     except Exception as e:
         logger.exception(f"Неожиданная ошибка при индексации: {e}")
         return False, f"indexing_error: {str(e)}"
@@ -3119,6 +3255,49 @@ def run_indexing_from_config():
     except Exception as e:
         logger.exception(f"Ошибка при индексации: {e}")
         return False, f"indexing_error: {str(e)}"
+
+
+def run_indexing_logic_sync(client=None, pre_chunked_documents=None):
+    """
+    Синхронная обертка для запуска асинхронной логики индексации.
+    Используется для запуска в фоновых задачах FastAPI.
+    
+    Args:
+        client: Клиент Qdrant (опционально)
+        pre_chunked_documents: Предварительно нарезанные документы (опционально)
+    
+    Returns:
+        Результат выполнения индексации
+    """
+    import sys
+    import asyncio
+    
+    # Проверяем, есть ли уже запущенный event loop
+    try:
+        loop = asyncio.get_running_loop()
+        # Если уже есть запущенный loop, создаем задачу
+        import concurrent.futures
+        import threading
+        
+        def run_in_new_loop():
+            return asyncio.run(run_indexing_logic(client=client, pre_chunked_documents=pre_chunked_documents))
+        
+        # Запускаем в отдельном потоке с новым event loop
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future = executor.submit(run_in_new_loop)
+            try:
+                return future.result()
+            except Exception as e:
+                logger.exception(f"Ошибка при выполнении индексации в фоновом потоке: {e}")
+                return False, f"indexing_error: {str(e)}"
+                
+    except RuntimeError:
+        # Нет запущенного loop, можем использовать asyncio.run
+        try:
+            return asyncio.run(run_indexing_logic(client=client, pre_chunked_documents=pre_chunked_documents))
+        except Exception as e:
+            logger.exception(f"Ошибка при выполнении индексации: {e}")
+            return False, f"indexing_error: {str(e)}"
 ====================================================================================================
 ==================== КОНЕЦ ФАЙЛА: core\indexing\indexer.py ====================
 
@@ -3322,7 +3501,7 @@ class Indexer:
             logger.info(f"Creating hybrid Qdrant collection '{self.config.collection_name}' with dense and sparse embeddings")
             # Удаляем существующую коллекцию, если она есть
             try:
-                self.client.delete_collection(self.config.collection_name)
+                client.delete_collection(self.config.collection_name)
             except Exception:
                 pass  # Коллекция не существует или ошибка при удалении
             
@@ -3341,7 +3520,7 @@ class Indexer:
             logger.info(f"Creating sparse-only Qdrant collection '{self.config.collection_name}' using native BM25 sparse embeddings")
             # Удаляем существующую коллекцию, если она есть
             try:
-                self.client.delete_collection(self.config.collection_name)
+                client.delete_collection(self.config.collection_name)
             except Exception:
                 pass  # Коллекция не существует или ошибка при удалении
             
@@ -3360,7 +3539,7 @@ class Indexer:
             logger.info(f"Creating dense-only Qdrant collection '{self.config.collection_name}'")
             # Удаляем существующую коллекцию, если она есть
             try:
-                self.client.delete_collection(self.config.collection_name)
+                client.delete_collection(self.config.collection_name)
             except Exception:
                 pass  # Коллекция не существует или ошибка при удалении
             
@@ -3426,7 +3605,7 @@ class Indexer:
                     if self.index_hybrid and self.sparse_emb:
                         # Удаляем существующую коллекцию, если она есть
                         try:
-                            self.client.delete_collection(self.config.collection_name)
+                            client.delete_collection(self.config.collection_name)
                         except Exception:
                             pass  # Коллекция не существует или ошибка при удалении
                         
@@ -3444,7 +3623,7 @@ class Indexer:
                     elif self.index_bm25 and self.sparse_emb and not self.index_dense:
                         # Удаляем существующую коллекцию, если она есть
                         try:
-                            self.client.delete_collection(self.config.collection_name)
+                            client.delete_collection(self.config.collection_name)
                         except Exception:
                             pass  # Коллекция не существует или ошибка при удалении
                         
@@ -3462,7 +3641,7 @@ class Indexer:
                     else:
                         # Удаляем существующую коллекцию, если она есть
                         try:
-                            self.client.delete_collection(self.config.collection_name)
+                            client.delete_collection(self.config.collection_name)
                         except Exception:
                             pass  # Коллекция не существует или ошибка при удалении
                         
@@ -4802,6 +4981,129 @@ class IndexingError(Exception):
 
 
 
+==================== НАЧАЛО ФАЙЛА: core\llm\llm_service.py ====================
+# Файл: core\llm\llm_service.py
+====================================================================================================
+"""Сервис для работы с LLM на основе llama-cpp-python (GGUF-модели)."""
+
+import logging
+from pathlib import Path
+from typing import Optional
+
+from llama_cpp import Llama
+
+logger = logging.getLogger(__name__)
+
+
+class LlamaService:
+    """Сервис для генерации текста с использованием GGUF-модели."""
+    
+    def __init__(self, model_path: str, n_ctx: int = 4096, verbose: bool = False):
+        """
+        Инициализация сервиса.
+        
+        Args:
+            model_path: Путь к GGUF-модели.
+            n_ctx: Размер контекста.
+            verbose: Включить verbose-логи.
+        """
+        self.model_path = Path(model_path)
+        self.n_ctx = n_ctx
+        self.verbose = verbose
+        self.llm: Optional[Llama] = None
+        self._load_model()
+    
+    def _load_model(self):
+        """Загрузка модели (ленивая)."""
+        if not self.model_path.exists():
+            logger.error(f"Модель не найдена: {self.model_path}")
+            return
+        
+        try:
+            self.llm = Llama(
+                model_path=str(self.model_path),
+                n_ctx=self.n_ctx,
+                verbose=self.verbose,
+                n_threads=4,  # Настраиваемо под систему
+            )
+            logger.info(f"Модель загружена: {self.model_path}")
+        except Exception as e:
+            logger.error(f"Ошибка загрузки модели {self.model_path}: {e}")
+            self.llm = None
+    
+    def generate(
+        self,
+        system_prompt: str,
+        user_query: str,
+        context: str,
+        max_tokens: int = 512,
+        temperature: float = 0.7
+    ) -> Optional[str]:
+        """
+        Генерация ответа.
+        
+        Args:
+            system_prompt: Системный промпт.
+            user_query: Запрос пользователя.
+            context: Контекст из retrieval.
+            max_tokens: Макс. токенов.
+            temperature: Температура.
+            
+        Returns:
+            str: Сгенерированный ответ или None при ошибке.
+        """
+        if not self.llm:
+            logger.error("LLM не загружена.")
+            return None
+        
+        # Формируем полный промпт
+        full_prompt = f"<|system|>\n{system_prompt}\n<|user|>\nContext:\n{context}\n\nQuestion: {user_query}\n<|assistant|>\n"
+        
+        try:
+            response = self.llm(
+                full_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stop=["<|assistant|>", "\n\n"],
+                echo=False
+            )
+            generated_text = response['choices'][0]['text'].strip()
+            # Remove potential assistant token if it appears in the response
+            if generated_text.startswith("<|assistant|>"):
+                generated_text = generated_text[len("<|assistant|>"):].strip()
+            logger.info(f"Генерация завершена: {len(generated_text)} символов")
+            return generated_text
+        except Exception as e:
+            logger.error(f"Ошибка генерации: {e}")
+            return None
+
+
+# Глобальный экземпляр (синглтон)
+_llm_service: Optional[LlamaService] = None
+
+
+def get_llm_service(config) -> Optional[LlamaService]:
+    """Получить сервис LLM (синглтон)."""
+    global _llm_service
+    if _llm_service is None and config.rag_enabled:
+        from config.resource_path import resource_path
+        model_path = resource_path(config.rag_model_path)
+        _llm_service = LlamaService(str(model_path), config.gguf_model_n_ctx)
+    return _llm_service
+====================================================================================================
+==================== КОНЕЦ ФАЙЛА: core\llm\llm_service.py ====================
+
+
+
+==================== НАЧАЛО ФАЙЛА: core\llm\__init__.py ====================
+# Файл: core\llm\__init__.py
+====================================================================================================
+
+====================================================================================================
+==================== КОНЕЦ ФАЙЛА: core\llm\__init__.py ====================
+
+
+
 ==================== НАЧАЛО ФАЙЛА: core\qdrant\qdrant_client.py ====================
 # Файл: core\qdrant\qdrant_client.py
 ====================================================================================================
@@ -5743,12 +6045,13 @@ from qdrant_client.http.models import CountResult
 
 from config.config_manager import ConfigManager
 from config.settings import Config
-from core.embedding.embeddings import get_dense_embedder, get_search_device
+from core.embedding.embeddings import get_dense_embedder, aget_dense_embedder, get_search_device
 from core.qdrant.qdrant_client import aget_qdrant_client
 from core.search.collection_analyzer import CollectionAnalyzer
 from core.search.search_executor import SearchExecutor
 from core.search.search_strategy import SearchStrategy
 from core.search.query_cache import QueryCache
+from core.llm.llm_service import get_llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -5784,7 +6087,7 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
             
         # Получаем эмбеддер для поиска
         search_device = get_search_device(device)
-        embedder = get_dense_embedder(config, search_device)
+        embedder = await aget_dense_embedder(config, search_device)
         
         # Инициализируем sparse embedding если он нужен
         sparse_emb = None
@@ -6008,6 +6311,52 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         return [], str(e)
 
 
+def generate_rag_response(
+    query: str,
+    results: List[Tuple[Any, float]],
+    config: Config
+) -> Optional[str]:
+    """
+    Генерация RAG-ответа на базе результатов поиска.
+    
+    Args:
+        query: Запрос.
+        results: Топ-результаты поиска.
+        config: Конфигурация.
+        
+    Returns:
+        str: Ответ LLM или None.
+    """
+    if not config.rag_enabled or len(results) == 0:
+        return None
+    
+    # Собираем контекст из top_k
+    top_k = min(config.rag_top_k, len(results))
+    context_parts = []
+    for res, _ in results[:top_k]:
+        content = res.get('content') or res.get('page_content', '')
+        source = res.get('metadata', {}).get('source', 'Unknown')
+        context_parts.append(f"Source: {source}\n{content}\n---")
+    
+    context = "\n".join(context_parts)
+    
+    # Получаем LLM сервис
+    llm_service = get_llm_service(config)
+    if not llm_service:
+        logger.error("LLM сервис недоступен.")
+        return None
+    
+    # Генерируем
+    response = llm_service.generate(
+        system_prompt=config.rag_system_prompt,
+        user_query=query,
+        context=context,
+        max_tokens=config.rag_max_tokens,
+        temperature=config.rag_temperature
+    )
+    return response
+
+
 def search_collections(query: str, k: int = None, metadata_filter: Optional[Dict[str, Any]] = None) -> List[Tuple[Any, float]]:
     """
     Выполняет поиск по коллекциям, используя настройки из config.json.
@@ -6067,7 +6416,7 @@ from qdrant_client.http.models import FieldCondition, Filter, MatchValue, Range
 from qdrant_client.models import SparseVector, Fusion, FusionQuery, Prefetch
 
 from config.config_manager import ConfigManager
-from core.embedding.embeddings import get_dense_embedder
+from core.embedding.embeddings import get_dense_embedder, get_search_device
 
 logger = logging.getLogger(__name__)
 
@@ -6362,8 +6711,9 @@ class SearchExecutor:
             try:
                 logger.info("Fallback to dense in except block")
                 config = ConfigManager.get_instance().get()
-                from core.embedding.embeddings import get_dense_embedder
-                embedder = get_dense_embedder(config, "auto")  # Re-init if needed
+                from core.embedding.embeddings import get_dense_embedder, get_search_device
+                search_device = get_search_device(None)  # используем дефолтное устройство для поиска
+                embedder = get_dense_embedder(config, search_device)  # Re-init if needed
                 dense_vector = embedder.embed_query(query)
                 search_filter = SearchExecutor._create_filter(metadata_filter) if metadata_filter else None
                 fallback_results = client.search(
@@ -6413,7 +6763,8 @@ class SearchExecutor:
             if search_mode == "hybrid":
                 logger.info(f"Starting hybrid search mode for collection {config.collection_name}")
                 # Для hybrid нужен dense embedder
-                embedder = get_dense_embedder(config, "auto")
+                search_device = get_search_device(None)  # используем дефолтное устройство для поиска
+                embedder = get_dense_embedder(config, search_device)
                 query_vector = embedder.embed_query(query)
                 
                 # Проверяем, есть ли валидный sparse embedding в sparse_params
@@ -6488,7 +6839,8 @@ class SearchExecutor:
                     results = []
             else:
                 # Dense — инициализируем dense embedder
-                embedder = get_dense_embedder(config, "auto")
+                search_device = get_search_device(None)  # используем дефолтное устройство для поиска
+                embedder = get_dense_embedder(config, search_device)
                 query_vector = embedder.embed_query(query)
                 # Для dense векторов используем именованный вектор
                 if vector_name:

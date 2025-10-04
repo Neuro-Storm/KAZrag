@@ -498,6 +498,36 @@ def update_advanced_settings(form_data: dict, config: Config):
             config.rag_temperature = float(form_data["rag_temperature"])
         except ValueError:
             raise HTTPException(400, detail="Неверная температура генерации для RAG")
+    if form_data.get("rag_context_size") is not None:
+        try:
+            config.rag_context_size = int(form_data["rag_context_size"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверный размер контекста для RAG")
+    if form_data.get("rag_max_context_length") is not None:
+        try:
+            config.rag_max_context_length = int(form_data["rag_max_context_length"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверная максимальная длина контекста для RAG")
+    if form_data.get("rag_gpu_layers") is not None:
+        try:
+            config.rag_gpu_layers = int(form_data["rag_gpu_layers"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное количество слоев для GPU в RAG")
+    if form_data.get("rag_threads") is not None:
+        try:
+            config.rag_threads = int(form_data["rag_threads"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное количество потоков для RAG")
+    if form_data.get("rag_batch_size") is not None:
+        try:
+            config.rag_batch_size = int(form_data["rag_batch_size"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверный размер батча для RAG")
+    if form_data.get("rag_beam_size") is not None:
+        try:
+            config.rag_beam_size = int(form_data["rag_beam_size"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверный размер beam для RAG")
 
 
 async def verify_admin_access_from_form(request: Request, credentials: HTTPBasicCredentials = Depends(security)):
