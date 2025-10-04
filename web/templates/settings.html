@@ -911,31 +911,28 @@
                             <input type="number" id="rag_context_size" name="rag_context_size" value="{{ config.rag_context_size }}" min="512" required>
                         </div>
                         <div>
-                            <label for="rag_max_context_length">Макс. длина контекста RAG (символы)</label>
-                            <input type="number" id="rag_max_context_length" name="rag_max_context_length" value="{{ config.rag_max_context_length }}" min="256" required>
+                            <label for="rag_gpu_layers">Слои для GPU (-1 = все)</label>
+                            <input type="number" id="rag_gpu_layers" name="rag_gpu_layers" value="{{ config.rag_gpu_layers }}" required>
                         </div>
                     </div>
                     
                     <div class="grid-2col">
-                        <div>
-                            <label for="rag_gpu_layers">Слои для GPU (-1 = все)</label>
-                            <input type="number" id="rag_gpu_layers" name="rag_gpu_layers" value="{{ config.rag_gpu_layers }}" required>
-                        </div>
                         <div>
                             <label for="rag_threads">Количество потоков</label>
                             <input type="number" id="rag_threads" name="rag_threads" value="{{ config.rag_threads }}" min="1" required>
                         </div>
-                    </div>
-                    
-                    <div class="grid-2col">
                         <div>
                             <label for="rag_batch_size">Размер батча</label>
                             <input type="number" id="rag_batch_size" name="rag_batch_size" value="{{ config.rag_batch_size }}" min="1" required>
                         </div>
+                    </div>
+                    
+                    <div class="grid-2col">
                         <div>
                             <label for="rag_beam_size">Размер beam для генерации</label>
                             <input type="number" id="rag_beam_size" name="rag_beam_size" value="{{ config.rag_beam_size }}" min="1" required>
                         </div>
+                        <div></div>  <!-- Пустой для выравнивания -->
                     </div>
                     
                     <div class="form-info">
@@ -945,7 +942,7 @@
                             <li>Первая загрузка модели займёт время (кэшируется).</li>
                             <li>RAG работает только если модель доступна.</li>
                             <li>Установите размер контекста модели больше, чем длина входного текста.</li>
-                            <li>Если возникают ошибки 'context window', уменьшите 'Макс. длину контекста RAG'.</li>
+                            <li>Если возникают ошибки 'context window', уменьшите количество топ-K результатов или длину отдельных фрагментов.</li>
                         </ul>
                     </div>
                     

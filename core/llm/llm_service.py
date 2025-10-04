@@ -97,12 +97,15 @@ class LlamaService:
         if prompt_length > max_context_bytes:
             logger.warning(f"Длина промпта ({prompt_length}) превышает ограничение ({max_context_bytes}), обрезаем контекст")
             # Обрезаем контекст, оставляя место для промпта и ответа
-            available_context_bytes = max_context_bytes - len(f"<|system|>\n{system_prompt}\n<|user|>\n\nQuestion: {user_query}\n<|assistant|>\n".encode('utf-8')) - (max_tokens * 4)
+            base_prompt = f"<|system|>\n{system_prompt}\n<|user|>\nContext:\n\nQuestion: {user_query}\n<|assistant|>\n"
+            base_prompt_length = len(base_prompt.encode('utf-8'))
+            available_context_bytes = max_context_bytes - base_prompt_length - (max_tokens * 4)
             
             if available_context_bytes > 0:
                 # Обрезаем контекст до доступного размера
                 truncated_context = context[:available_context_bytes]
                 full_prompt = f"<|system|>\n{system_prompt}\n<|user|>\nContext:\n{truncated_context}\n\nQuestion: {user_query}\n<|assistant|>\n"
+                logger.info(f"Контекст обрезан до {len(truncated_context)} байт")
             else:
                 logger.error("Недостаточно места для контекста даже после обрезки")
                 return None
@@ -128,20 +131,41 @@ class LlamaService:
 
 # Глобальный экземпляр (синглтон)
 _llm_service: Optional[LlamaService] = None
+_llm_service_params: Optional[dict] = None
 
 
 def get_llm_service(config) -> Optional[LlamaService]:
     """Получить сервис LLM (синглтон)."""
-    global _llm_service
-    if _llm_service is None and config.rag_enabled:
-        from config.resource_path import resource_path
-        model_path = resource_path(config.rag_model_path)
-        _llm_service = LlamaService(
-            str(model_path), 
-            n_ctx=config.rag_context_size,
-            n_gpu_layers=config.rag_gpu_layers,
-            n_threads=config.rag_threads,
-            n_batch=config.rag_batch_size,
-            n_beams=config.rag_beam_size
-        )
+    global _llm_service, _llm_service_params
+    
+    # Проверяем, нужно ли пересоздать сервис
+    current_params = {
+        'model_path': config.rag_model_path,
+        'n_ctx': config.rag_context_size,
+        'n_gpu_layers': config.rag_gpu_layers,
+        'n_threads': config.rag_threads,
+        'n_batch': config.rag_batch_size,
+        'n_beams': config.rag_beam_size
+    }
+    
+    if config.rag_enabled:
+        # Если сервис не создан или параметры изменились, создаем новый
+        if _llm_service is None or _llm_service_params != current_params:
+            from config.resource_path import resource_path
+            model_path = resource_path(config.rag_model_path)
+            _llm_service = LlamaService(
+                str(model_path), 
+                n_ctx=config.rag_context_size,
+                n_gpu_layers=config.rag_gpu_layers,
+                n_threads=config.rag_threads,
+                n_batch=config.rag_batch_size,
+                n_beams=config.rag_beam_size
+            )
+            _llm_service_params = current_params
+            logger.info(f"LLM сервис пересоздан с новыми параметрами: {current_params}")
+    else:
+        # Если RAG отключен, сбрасываем сервис
+        _llm_service = None
+        _llm_service_params = None
+    
     return _llm_service

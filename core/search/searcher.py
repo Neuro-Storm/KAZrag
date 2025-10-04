@@ -301,31 +301,6 @@ def generate_rag_response(
     
     context = "\n".join(context_parts)
     
-    # Обрезаем контекст до максимальной длины, если необходимо
-    max_context_length = config.rag_max_context_length
-    if len(context) > max_context_length:
-        logger.info(f"Контекст превышает максимальную длину ({len(context)} > {max_context_length}), обрезаем")
-        # Обрезаем, пытаясь сохранить больше релевантных результатов
-        # Начинаем с полного контекста и постепенно уменьшаем количество результатов
-        for k in range(top_k, 0, -1):
-            temp_context_parts = []
-            for res, _ in results[:k]:
-                content = res.get('content') or res.get('page_content', '')
-                source = res.get('metadata', {}).get('source', 'Unknown')
-                temp_context_parts.append(f"Source: {source}\n{content}\n---")
-            
-            temp_context = "\n".join(temp_context_parts)
-            if len(temp_context) <= max_context_length:
-                context = temp_context
-                logger.info(f"Контекст ограничен до {k} результатов, длина: {len(context)}")
-                break
-        else:
-            # Если даже один результат слишком длинный, обрезаем его
-            if len(context_parts) > 0:
-                first_part = context_parts[0]
-                context = first_part[:max_context_length]
-                logger.info(f"Обрезаем первый результат до {max_context_length} символов")
-    
     # Получаем LLM сервис
     llm_service = get_llm_service(config)
     if not llm_service:

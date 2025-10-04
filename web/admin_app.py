@@ -503,11 +503,6 @@ def update_advanced_settings(form_data: dict, config: Config):
             config.rag_context_size = int(form_data["rag_context_size"])
         except ValueError:
             raise HTTPException(400, detail="Неверный размер контекста для RAG")
-    if form_data.get("rag_max_context_length") is not None:
-        try:
-            config.rag_max_context_length = int(form_data["rag_max_context_length"])
-        except ValueError:
-            raise HTTPException(400, detail="Неверная максимальная длина контекста для RAG")
     if form_data.get("rag_gpu_layers") is not None:
         try:
             config.rag_gpu_layers = int(form_data["rag_gpu_layers"])
