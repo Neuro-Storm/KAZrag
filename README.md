@@ -114,6 +114,32 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
+### 4. Возможная проблема с совместимостью PyTorch/TorchVision
+
+Если вы столкнетесь с ошибкой `operator torchvision::nms does not exist`, выполните следующие шаги:
+
+1. Удалите текущие версии PyTorch и TorchVision:
+```bash
+pip uninstall torch torchvision torchaudio
+```
+
+2. Установите совместимые версии (выберите подходящий вариант):
+
+Для CPU-only:
+```bash
+pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cpu
+```
+
+Для CUDA 11.8:
+```bash
+pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu118
+```
+
+Для CUDA 12.1:
+```bash
+pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu121
+```
+
 В `.env` можно настроить:
 - `ADMIN_API_KEY` для защиты админки
 - `HUGGINGFACE_TOKEN` для доступа к приватным моделям на HuggingFace

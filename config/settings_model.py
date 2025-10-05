@@ -105,6 +105,12 @@ class Config(BaseSettings):
     search_default_k: int = Field(default=5, ge=1)  # Минимум 1 результат
     use_hybrid: bool = False  # Использовать гибридный поиск (dense + sparse)
     hybrid_alpha: float = Field(default=0.7, ge=0.0, le=1.0)  # Вес для dense в гибридном поиске
+
+    # Глобальные настройки поиска (перенесены из формы поиска)
+    search_default_collection: str = "final-dense-collection"
+    search_default_device: str = "cpu"
+    search_default_type: str = "dense"  # "dense", "sparse", "hybrid"
+    search_default_use_reranker: bool = True
     
     # BM25 Native Sparse Configuration
     use_bm25: bool = True  # Enable native BM25 via sparse vectors with IDF

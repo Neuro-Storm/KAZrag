@@ -466,7 +466,7 @@ def update_advanced_settings(form_data: dict, config: Config):
         try:
             config.indexing_default_batch_size = int(form_data["indexing_default_batch_size"])
         except ValueError:
-            raise HTTPException(400, detail="Неверный размер батча для индексации документов по умолчанию")
+            raise HTTPException(400, detail="Неверное размер батча для индексации документов по умолчанию")
     if form_data.get("sparse_embedding") is not None:
         config.sparse_embedding = form_data["sparse_embedding"].strip()
     
@@ -517,12 +517,21 @@ def update_advanced_settings(form_data: dict, config: Config):
         try:
             config.rag_batch_size = int(form_data["rag_batch_size"])
         except ValueError:
-            raise HTTPException(400, detail="Неверный размер батча для RAG")
+            raise HTTPException(400, detail="Неверное размер батча для RAG")
     if form_data.get("rag_beam_size") is not None:
         try:
             config.rag_beam_size = int(form_data["rag_beam_size"])
         except ValueError:
             raise HTTPException(400, detail="Неверный размер beam для RAG")
+    
+    # Глобальные настройки поиска
+    if form_data.get("search_default_collection") is not None:
+        config.search_default_collection = form_data["search_default_collection"].strip()
+    if form_data.get("search_default_device") is not None:
+        config.search_default_device = form_data["search_default_device"].strip()
+    if form_data.get("search_default_type") is not None:
+        config.search_default_type = form_data["search_default_type"].strip()
+    config.search_default_use_reranker = "search_default_use_reranker" in form_data
 
 
 async def verify_admin_access_from_form(request: Request, credentials: HTTPBasicCredentials = Depends(security)):

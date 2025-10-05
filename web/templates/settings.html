@@ -656,8 +656,34 @@
                     <input type="hidden" name="action" value="save_advanced_settings">
                     <input type="hidden" name="active_tab" value="search">
                     
+                    <label for="search_default_collection">Коллекция по умолчанию</label>
+                    <select id="search_default_collection" name="search_default_collection" required>
+                        {% for collection in collections %}
+                            <option value="{{ collection }}"{% if collection == config.search_default_collection %} selected{% endif %}>{{ collection }}</option>
+                        {% endfor %}
+                    </select>
+                    
+                    <label for="search_default_device">Устройство для поиска</label>
+                    <select id="search_default_device" name="search_default_device" required>
+                        <option value="cpu"{% if config.search_default_device == 'cpu' %} selected{% endif %}>CPU</option>
+                        <option value="cuda"{% if config.search_default_device == 'cuda' %} selected{% endif %}>GPU (CUDA)</option>
+                    </select>
+                    
+                    <label for="search_default_type">Тип поиска</label>
+                    <select id="search_default_type" name="search_default_type" required>
+                        <option value="dense"{% if config.search_default_type == 'dense' %} selected{% endif %}>Плотный (dense)</option>
+                        <option value="sparse"{% if config.search_default_type == 'sparse' %} selected{% endif %}>Разреженный (sparse)</option>
+                        <option value="hybrid"{% if config.search_default_type == 'hybrid' %} selected{% endif %}>Гибридный (dense + sparse)</option>
+                    </select>
+                    
                     <label for="search_default_k">Количество результатов поиска по умолчанию</label>
                     <input type="number" id="search_default_k" name="search_default_k" value="{{ config.search_default_k }}" min="1" required>
+                    
+                    <div style="margin-top: 1rem;">
+                        <input type="checkbox" id="search_default_use_reranker" name="search_default_use_reranker" value="True" 
+                               {% if config.search_default_use_reranker %}checked{% endif %}>
+                        <label for="search_default_use_reranker">Использовать reranker</label>
+                    </div>
                     
                     <button type="submit" :disabled="isProcessing">Сохранить настройки поиска</button>
                     <div class="progress" x-show="isProcessing">

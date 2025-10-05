@@ -787,13 +787,18 @@ class ConfigManager:
                 config.sparse_vector_name = updates.get('sparse_vector_name', config.sparse_vector_name)
             
             # Validate new RAG fields
-            if any(key in updates for key in ['rag_enabled', 'rag_model_path', 'rag_system_prompt', 'rag_top_k', 'rag_max_tokens', 'rag_temperature']):
+            if any(key in updates for key in ['rag_enabled', 'rag_model_path', 'rag_system_prompt', 'rag_top_k', 'rag_max_tokens', 'rag_temperature', 'rag_context_size', 'rag_gpu_layers', 'rag_threads', 'rag_batch_size', 'rag_beam_size']):
                 config.rag_enabled = updates.get('rag_enabled', config.rag_enabled)
                 config.rag_model_path = updates.get('rag_model_path', config.rag_model_path)
                 config.rag_system_prompt = updates.get('rag_system_prompt', config.rag_system_prompt)
                 config.rag_top_k = updates.get('rag_top_k', config.rag_top_k)
                 config.rag_max_tokens = updates.get('rag_max_tokens', config.rag_max_tokens)
                 config.rag_temperature = updates.get('rag_temperature', config.rag_temperature)
+                config.rag_context_size = updates.get('rag_context_size', config.rag_context_size)
+                config.rag_gpu_layers = updates.get('rag_gpu_layers', config.rag_gpu_layers)
+                config.rag_threads = updates.get('rag_threads', config.rag_threads)
+                config.rag_batch_size = updates.get('rag_batch_size', config.rag_batch_size)
+                config.rag_beam_size = updates.get('rag_beam_size', config.rag_beam_size)
             
             # Create new config object
             updated_config = Config(**config_dict)
@@ -1128,6 +1133,11 @@ class Config(BaseSettings):
     rag_top_k: int = Field(default=3, ge=1, le=10)  # Количество топ-результатов для контекста (1-10)
     rag_max_tokens: int = Field(default=512, ge=1)  # Максимум токенов в генерации
     rag_temperature: float = Field(default=0.7, ge=0.0, le=1.0)  # Температура генерации
+    rag_context_size: int = Field(default=4096, ge=512)  # Размер контекста для модели
+    rag_gpu_layers: int = Field(default=-1, ge=-1)  # Количество слоев для GPU (-1 = все слои)
+    rag_threads: int = Field(default=4, ge=1)  # Количество потоков для генерации
+    rag_batch_size: int = Field(default=512, ge=1)  # Размер батча для обработки
+    rag_beam_size: int = Field(default=1, ge=1)  # Размер beam для генерации
 
     def save_to_file(self, file_path: Optional[str] = None) -> None:
         """Сохранить конфигурацию в JSON файл.
@@ -2314,20 +2324,6 @@ class EmbeddingManager:
             if any(model_to_trust in model_lower for model_to_trust in models_requiring_trust):
                 model_kwargs["trust_remote_code"] = True
                 logger.info(f"Включено trust_remote_code для модели {model_name}")
-
-            # Если используем CUDA, указываем dtype через model_kwargs для поддерживающих моделей
-            # Убираем torch_dtype для моделей, которые его не поддерживают
-            if device == "cuda":
-                # Добавляем torch_dtype только для моделей, которые это поддерживают
-                # Проверяем по названию модели или по другим критериям
-                unsupported_models = ["qwen", "qwen3", "google/mt5-base", "t5", "mt5"]
-                model_lower = model_name.lower()
-                
-                # Если модель не в списке неподдерживающих, добавляем torch_dtype
-                if not any(unsupported in model_lower for unsupported in unsupported_models):
-                    model_kwargs["torch_dtype"] = torch.float16
-                else:
-                    logger.debug(f"Модель {model_name} не поддерживает torch_dtype, используем стандартный тип данных")
 
             # Если модель не найдена в кеше или batch_size измнился, создаем новую
             embedder = HuggingFaceEmbeddings(
@@ -4998,17 +4994,32 @@ logger = logging.getLogger(__name__)
 class LlamaService:
     """Сервис для генерации текста с использованием GGUF-модели."""
     
-    def __init__(self, model_path: str, n_ctx: int = 4096, verbose: bool = False):
+    def __init__(self, 
+                 model_path: str, 
+                 n_ctx: int = 4096, 
+                 n_gpu_layers: int = -1,
+                 n_threads: int = 4,
+                 n_batch: int = 512,
+                 n_beams: int = 1,
+                 verbose: bool = False):
         """
         Инициализация сервиса.
         
         Args:
             model_path: Путь к GGUF-модели.
             n_ctx: Размер контекста.
+            n_gpu_layers: Количество слоев для GPU (-1 = все слои)
+            n_threads: Количество потоков
+            n_batch: Размер батча
+            n_beams: Размер beam для генерации
             verbose: Включить verbose-логи.
         """
         self.model_path = Path(model_path)
         self.n_ctx = n_ctx
+        self.n_gpu_layers = n_gpu_layers
+        self.n_threads = n_threads
+        self.n_batch = n_batch
+        self.n_beams = n_beams
         self.verbose = verbose
         self.llm: Optional[Llama] = None
         self._load_model()
@@ -5023,10 +5034,12 @@ class LlamaService:
             self.llm = Llama(
                 model_path=str(self.model_path),
                 n_ctx=self.n_ctx,
+                n_gpu_layers=self.n_gpu_layers,
+                n_threads=self.n_threads,
+                n_batch=self.n_batch,
                 verbose=self.verbose,
-                n_threads=4,  # Настраиваемо под систему
             )
-            logger.info(f"Модель загружена: {self.model_path}")
+            logger.info(f"Модель загружена: {self.model_path} (context={self.n_ctx}, gpu_layers={self.n_gpu_layers}, threads={self.n_threads})")
         except Exception as e:
             logger.error(f"Ошибка загрузки модели {self.model_path}: {e}")
             self.llm = None
@@ -5059,6 +5072,26 @@ class LlamaService:
         # Формируем полный промпт
         full_prompt = f"<|system|>\n{system_prompt}\n<|user|>\nContext:\n{context}\n\nQuestion: {user_query}\n<|assistant|>\n"
         
+        # Проверяем длину промпта и обрезаем контекст при необходимости
+        prompt_length = len(full_prompt.encode('utf-8'))
+        max_context_bytes = self.n_ctx * 4  # примерное ограничение (4 байта на токен как грубая оценка)
+        
+        if prompt_length > max_context_bytes:
+            logger.warning(f"Длина промпта ({prompt_length}) превышает ограничение ({max_context_bytes}), обрезаем контекст")
+            # Обрезаем контекст, оставляя место для промпта и ответа
+            base_prompt = f"<|system|>\n{system_prompt}\n<|user|>\nContext:\n\nQuestion: {user_query}\n<|assistant|>\n"
+            base_prompt_length = len(base_prompt.encode('utf-8'))
+            available_context_bytes = max_context_bytes - base_prompt_length - (max_tokens * 4)
+            
+            if available_context_bytes > 0:
+                # Обрезаем контекст до доступного размера
+                truncated_context = context[:available_context_bytes]
+                full_prompt = f"<|system|>\n{system_prompt}\n<|user|>\nContext:\n{truncated_context}\n\nQuestion: {user_query}\n<|assistant|>\n"
+                logger.info(f"Контекст обрезан до {len(truncated_context)} байт")
+            else:
+                logger.error("Недостаточно места для контекста даже после обрезки")
+                return None
+        
         try:
             response = self.llm(
                 full_prompt,
@@ -5080,15 +5113,43 @@ class LlamaService:
 
 # Глобальный экземпляр (синглтон)
 _llm_service: Optional[LlamaService] = None
+_llm_service_params: Optional[dict] = None
 
 
 def get_llm_service(config) -> Optional[LlamaService]:
     """Получить сервис LLM (синглтон)."""
-    global _llm_service
-    if _llm_service is None and config.rag_enabled:
-        from config.resource_path import resource_path
-        model_path = resource_path(config.rag_model_path)
-        _llm_service = LlamaService(str(model_path), config.gguf_model_n_ctx)
+    global _llm_service, _llm_service_params
+    
+    # Проверяем, нужно ли пересоздать сервис
+    current_params = {
+        'model_path': config.rag_model_path,
+        'n_ctx': config.rag_context_size,
+        'n_gpu_layers': config.rag_gpu_layers,
+        'n_threads': config.rag_threads,
+        'n_batch': config.rag_batch_size,
+        'n_beams': config.rag_beam_size
+    }
+    
+    if config.rag_enabled:
+        # Если сервис не создан или параметры изменились, создаем новый
+        if _llm_service is None or _llm_service_params != current_params:
+            from config.resource_path import resource_path
+            model_path = resource_path(config.rag_model_path)
+            _llm_service = LlamaService(
+                str(model_path), 
+                n_ctx=config.rag_context_size,
+                n_gpu_layers=config.rag_gpu_layers,
+                n_threads=config.rag_threads,
+                n_batch=config.rag_batch_size,
+                n_beams=config.rag_beam_size
+            )
+            _llm_service_params = current_params
+            logger.info(f"LLM сервис пересоздан с новыми параметрами: {current_params}")
+    else:
+        # Если RAG отключен, сбрасываем сервис
+        _llm_service = None
+        _llm_service_params = None
+    
     return _llm_service
 ====================================================================================================
 ==================== КОНЕЦ ФАЙЛА: core\llm\llm_service.py ====================
@@ -6176,11 +6237,11 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         # Для других режимов: использовать SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter)
         logger.info(f"Calling SearchExecutor.execute_search with mode '{search_mode}', vector_name '{vector_name}', sparse_params keys: {list(sparse_params.keys()) if sparse_params else 'None'}")
         if search_mode != "dense":
-            results, error = await SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter)
+            results, error = await SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter, collection_name)
         else:
             # Выполняем поиск с использованием кэшированного вектора
             # Используем SearchExecutor для плотного поиска тоже
-            results, error = await SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter)
+            results, error = await SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter, collection_name)
         
         logger.info(f"SearchExecutor returned: {len(results) if results else 0} results, error: {error}")
         
@@ -6430,7 +6491,8 @@ class SearchExecutor:
         query: str,
         query_vector: List[float],
         k: int, 
-        metadata_filter: Optional[Dict[str, Any]] = None
+        metadata_filter: Optional[Dict[str, Any]] = None,
+        collection_name: str = None
     ) -> Tuple[List[Tuple[Any, float]], Optional[str]]:
         """
         Выполняет поиск с использованием предварительно вычисленного вектора запроса.
@@ -6441,12 +6503,14 @@ class SearchExecutor:
             query_vector (List[float]): Предварительно вычисленный вектор запроса.
             k (int): Количество результатов.
             metadata_filter (Optional[Dict[str, Any]]): Фильтр по метаданным.
+            collection_name (str): Название коллекции для поиска.
             
         Returns:
             Tuple[List[Tuple[Any, float]], Optional[str]]: (результаты поиска, ошибка)
         """
         try:
-            collection_name = ConfigManager.get_instance().get().collection_name  # Получаем из конфига
+            if collection_name is None:
+                collection_name = ConfigManager.get_instance().get().collection_name  # Получаем из конфига
             # Выполняем поиск с опциональной фильтрацией по метаданным, используя готовый вектор
             if metadata_filter:
                 # Создаем фильтр для Qdrant
@@ -6558,14 +6622,15 @@ class SearchExecutor:
 
     @staticmethod
     async def execute_hybrid_search(
-        client, query: str, embedder, sparse_params: Dict, k: int, metadata_filter: Optional[Dict[str, Any]] = None
+        client, query: str, embedder, sparse_params: Dict, k: int, metadata_filter: Optional[Dict[str, Any]] = None, collection_name: str = None
     ) -> Tuple[List[Any], Optional[str]]:  # Changed to return raw ScoredPoint objects
         """
         Выполняет hybrid поиск с dense + sparse через Query API.
         """
         try:
             config = ConfigManager.get_instance().get()
-            collection_name = config.collection_name
+            if collection_name is None:
+                collection_name = config.collection_name
             
             # Dense vector
             dense_vector = embedder.embed_query(query)
@@ -6737,7 +6802,8 @@ class SearchExecutor:
         sparse_params: Optional[Dict],
         query: str, 
         k: int, 
-        metadata_filter: Optional[Dict[str, Any]] = None
+        metadata_filter: Optional[Dict[str, Any]] = None,
+        collection_name: str = None
     ) -> Tuple[List[Tuple[Any, float]], Optional[str]]:
         """
         Выполняет поиск с опциональной фильтрацией по метаданным.
@@ -6750,18 +6816,21 @@ class SearchExecutor:
             query (str): Поисковый запрос.
             k (int): Количество результатов.
             metadata_filter (Optional[Dict[str, Any]]): Фильтр по метаданным.
+            collection_name (str): Название коллекции для поиска.
             
         Returns:
             Tuple[List[Tuple[Any, float]], Optional[str]]: (результаты поиска, ошибка)
         """
         try:
             config = ConfigManager.get_instance().get()
+            if collection_name is None:
+                collection_name = config.collection_name
             
             # Создаем фильтр, если нужно
             search_filter = SearchExecutor._create_filter(metadata_filter) if metadata_filter else None
             
             if search_mode == "hybrid":
-                logger.info(f"Starting hybrid search mode for collection {config.collection_name}")
+                logger.info(f"Starting hybrid search mode for collection {collection_name}")
                 # Для hybrid нужен dense embedder
                 search_device = get_search_device(None)  # используем дефолтное устройство для поиска
                 embedder = get_dense_embedder(config, search_device)
@@ -6775,7 +6844,7 @@ class SearchExecutor:
                 if not config.use_bm25 or sparse_embedding is None:
                     logger.info("Sparse embedding not available, using dense-only search for hybrid mode")
                     results = client.search(
-                        collection_name=config.collection_name,
+                        collection_name=collection_name,
                         query_vector=("dense_vector", query_vector),
                         limit=k,
                         query_filter=search_filter,
@@ -6786,12 +6855,12 @@ class SearchExecutor:
                 else:
                     logger.info(f"Executing hybrid search with sparse vector name: {sparse_params.get('sparse_vector_name', 'NOT SPECIFIED')}")
                     # Обычный гибридный поиск
-                    results, error = await SearchExecutor.execute_hybrid_search(client, query, embedder, sparse_params, k, metadata_filter)
+                    results, error = await SearchExecutor.execute_hybrid_search(client, query, embedder, sparse_params, k, metadata_filter, collection_name)
                     if error:
                         logger.warning(f"Hybrid search failed: {error}, falling back to dense search")
                         # Fallback to dense search
                         results = client.search(
-                            collection_name=config.collection_name,
+                            collection_name=collection_name,
                             query_vector=("dense_vector", query_vector),
                             limit=k,
                             query_filter=search_filter,
@@ -6827,7 +6896,7 @@ class SearchExecutor:
                         named_sparse = models.NamedSparseVector(name=sparse_vector_name, vector=sparse_vec)
                         
                         results = client.search(
-                            collection_name=config.collection_name,
+                            collection_name=collection_name,
                             query_vector=named_sparse,  # Передаем sparse как query_vector
                             limit=k,
                             query_filter=search_filter,
@@ -6845,7 +6914,7 @@ class SearchExecutor:
                 # Для dense векторов используем именованный вектор
                 if vector_name:
                     results = client.search(
-                        collection_name=config.collection_name,
+                        collection_name=collection_name,
                         query_vector=(vector_name, query_vector),
                         limit=k,
                         query_filter=search_filter,
@@ -6855,7 +6924,7 @@ class SearchExecutor:
                 else:
                     # Если имя вектора не указано, используем имя по умолчанию "dense_vector"
                     results = client.search(
-                        collection_name=config.collection_name,
+                        collection_name=collection_name,
                         query_vector=("dense_vector", query_vector),
                         limit=k,
                         query_filter=search_filter,

@@ -39,7 +39,15 @@ async def get_search_page(request: Request, config: Config = Depends(get_config)
         collections = get_cached_collections(client=client)
         logger.info(f"[{request_id}] Search page loaded successfully")
         return get_templates().TemplateResponse("index.html", {
-            "request": request, "results": [], "collections": collections, "config": config
+            "request": request, 
+            "results": [], 
+            "collections": collections, 
+            "selected_collection": config.search_default_collection,  # Добавляем глобальную настройку
+            "k": config.search_default_k,  # Добавляем глобальную настройку
+            "selected_search_device": config.search_default_device,  # Добавляем глобальную настройку
+            "selected_search_type": config.search_default_type,  # Добавляем глобальную настройку
+            "use_reranker": config.search_default_use_reranker,  # Добавляем глобальную настройку
+            "config": config
         })
     except Exception as e:
         logger.error(f"[{request_id}] Error loading search page: {str(e)}")
@@ -49,6 +57,11 @@ async def get_search_page(request: Request, config: Config = Depends(get_config)
             "request": request, 
             "results": [], 
             "collections": collections, 
+            "selected_collection": config.search_default_collection,
+            "k": config.search_default_k,
+            "selected_search_device": config.search_default_device,
+            "selected_search_type": config.search_default_type,
+            "use_reranker": config.search_default_use_reranker,
             "config": config,
             "error": "Ошибка загрузки страницы поиска"
         })
@@ -58,12 +71,11 @@ async def get_search_page(request: Request, config: Config = Depends(get_config)
 async def handle_search(
     request: Request,
     query: str = Form(...),
-    collection: str = Form(...),
-    search_device: str = Form("cpu"),
-    k: int = Form(None),  # Используем None как значение по умолчанию
-    search_type: str = Form("dense"),  # Новый параметр для типа поиска
-    hybrid: bool = Form(False),  # Для обратной совместимости
-    use_reranker: bool = Form(True),  # Переключатель для использования reranker
+    # collection: str = Form(...),  # Теперь используем глобальную настройку
+    # search_device: str = Form("cpu"),  # Теперь используем глобальную настройку
+    # k: int = Form(None),  # Теперь используем глобальную настройку
+    # search_type: str = Form("dense"),  # Теперь используем глобальную настройку
+    # use_reranker: bool = Form(True),  # Теперь используем глобальную настройку
     filter_author: str = Form(None),  # Фильтр по автору
     filter_source: str = Form(None),  # Фильтр по источнику
     filter_file_extension: str = Form(None),  # Фильтр по типу файла
@@ -73,13 +85,17 @@ async def handle_search(
 ):
     """Обрабатывает поисковый запрос."""
     request_id = get_request_id(request)
+    
+    # Используем глобальные настройки из конфигурации
+    collection = config.search_default_collection
+    search_device = config.search_default_device
+    k = config.search_default_k
+    search_type = config.search_default_type
+    use_reranker = config.search_default_use_reranker  # Используем глобальную настройку
+    
     logger.info(f"[{request_id}] Search request received: query='{query}', collection='{collection}'")
     
     try:
-        # Если k не указано, используем значение из конфигурации
-        if k is None:
-            k = config.search_default_k
-        
         # Определяем тип поиска
         if search_type == "hybrid":
             hybrid = True
@@ -118,7 +134,7 @@ async def handle_search(
         # Сохраняем оригинальную настройку reranker
         original_reranker_enabled = config.reranker_enabled
         
-        # Если пользователь явно указал не использовать reranker, временно отключаем его
+        # Если глобальная настройка reranker отключена, временно отключаем его
         if not use_reranker:
             config.reranker_enabled = False
         

@@ -140,23 +140,38 @@ class EmbeddingManager:
                 logger.info(f"Включено trust_remote_code для модели {model_name}")
 
             # Если модель не найдена в кеше или batch_size измнился, создаем новую
-            embedder = HuggingFaceEmbeddings(
-                model_name=model_name,
-                model_kwargs=model_kwargs,
-                encode_kwargs=encode_kwargs
-            )
+            try:
+                embedder = HuggingFaceEmbeddings(
+                    model_name=model_name,
+                    model_kwargs=model_kwargs,
+                    encode_kwargs=encode_kwargs
+                )
 
-            # Устанавливаем batch_size для последующего использования
-            embedder._batch_size = batch_size  # Для отслеживания
-            
-            # Сохраняем модель в кэш
-            self._embedder_cache[cache_key] = embedder
-            
-            return embedder
+                # Устанавливаем batch_size для последующего использования
+                embedder._batch_size = batch_size  # Для отслеживания
+                
+                # Сохраняем модель в кэш
+                self._embedder_cache[cache_key] = embedder
+                
+                return embedder
+            except Exception as e:
+                logger.error(f"Failed to create HuggingFaceEmbeddings for model {model_name}: {e}")
+                # Повторный вызов ошибки с более подробным описанием
+                raise
             
         except Exception as e:
-            logger.exception(f"Error creating embedder: {e}")
-            raise EmbeddingError(f"Failed to create embedder: {e}")
+            # Проверяем, является ли это ошибкой совместимости PyTorch/Torchvision
+            error_str = str(e)
+            if "torchvision::nms does not exist" in error_str or "operator torchvision" in error_str:
+                logger.error("PyTorch/TorchVision compatibility issue detected.")
+                logger.error("SOLUTION: Update PyTorch and TorchVision to compatible versions:")
+                logger.error("For CPU: pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cpu")
+                logger.error("For CUDA 11.8: pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu118")
+                logger.error("For CUDA 12.1: pip install torch==2.1.2 torchvision==0.16.2 torchaudio==2.1.2 --index-url https://download.pytorch.org/whl/cu121")
+                raise EmbeddingError(f"PyTorch/TorchVision compatibility error. Please update PyTorch and TorchVision to compatible versions: {e}")
+            else:
+                logger.exception(f"Error creating embedder: {e}")
+                raise EmbeddingError(f"Failed to create embedder: {e}")
     
     def _get_gguf_embedder(self, config: Config, device: str) -> Embeddings:
         """Получает GGUF эмбеддер.

@@ -79,6 +79,34 @@
             border-radius: 4px;
             margin: 1rem 0;
         }
+        /* Стили для поисковой строки */
+        .search-input-wrapper {
+            width: 100%;
+            max-width: 800px; /* Ограничиваем максимальную ширину */
+            margin: 0 auto 1rem auto; /* Центрируем и добавляем отступ снизу */
+            display: block;
+        }
+        .search-input-container {
+            display: flex;
+            gap: 0.5rem;
+        }
+        #query {
+            flex: 1; /* Поле ввода занимает доступное пространство */
+            display: block;
+            padding: 0.75rem;
+            font-size: 1.1rem;
+        }
+        #search-form button[type="submit"] {
+            padding: 0.75rem 1.5rem;
+            font-size: 1.1rem;
+            white-space: nowrap;
+        }
+        /* Обертка для центрирования формы */
+        #search-form {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
     </style>
 </head>
 <body>
@@ -88,27 +116,20 @@
     </header>
     <main x-data="{ showAdvancedFilter: false }">
         <form id="search-form">
-            <div class="grid">
-                <label for="collection">Искать в коллекции
-                    <select id="collection" name="collection" required>
-                        <option value="" disabled selected>Выберите коллекцию</option>
-                        {% for c in collections %}
-                            <option value="{{ c }}" {% if c == selected_collection %}selected{% endif %}>{{ c }}</option>
-                        {% endfor %}
-                    </select>
-                </label>
-                <label for="search_device">Устройство для поиска
-                    <select id="search_device" name="search_device">
-                        <option value="cpu" {% if selected_search_device == 'cpu' %}selected{% endif %}>CPU</option>
-                        <option value="cuda" {% if selected_search_device == 'cuda' %}selected{% endif %}>GPU (если доступна)</option>
-                    </select>
-                </label>
-            </div>
-            <label for="query">Поисковый запрос:</label>
-            <input type="text" name="query" id="query" placeholder="Введите ваш запрос..." value="{{ query or '' }}" required>
+            <!-- Скрытые поля для передачи глобальных настроек -->
+            <input type="hidden" name="collection" id="collection" value="{{ config.search_default_collection if config else 'default-collection' }}">
+            <input type="hidden" name="search_device" id="search_device" value="{{ config.search_default_device if config else 'cpu' }}">
+            <input type="hidden" name="search_type" id="search_type_hidden" value="{{ config.search_default_type if config else 'dense' }}">
+            <input type="hidden" name="k" id="k" value="{{ config.search_default_k if config else 5 }}">
+            <input type="hidden" name="use_reranker" id="use_reranker" value="{{ 'True' if config and config.search_default_use_reranker else 'False' }}">
             
-            <label for="k">Количество результатов:</label>
-            <input type="number" name="k" id="k" value="{{ k or config.search_default_k if config else 5 }}" min="1" max="100">
+            <div class="search-input-wrapper">
+                <label for="query">Поисковый запрос:</label>
+                <div class="search-input-container">
+                    <input type="text" name="query" id="query" placeholder="Введите ваш запрос..." value="{{ query or '' }}" required>
+                    <button type="submit">Найти</button>
+                </div>
+            </div>
             
             <!-- Фильтр по метаданным под спойлером -->
             <button type="button" class="collapsible" @click="showAdvancedFilter = !showAdvancedFilter">Фильтр по метаданным</button>
@@ -144,30 +165,9 @@
                         <p class="help-text">Примеры: {"author": "Иванов"}, {"year": {"$gt": 2020}}, {"tags": {"$contains": "важно"}}</p>
                     </div>
                     
-                    <a id="toggle-advanced-filter" class="advanced-filter-toggle" onclick="toggleAdvancedFilter()">Показать расширенный фильтр</a>
+                    <a id="toggle-advanced-filter" class="advanced-filter-toggle" onclick="toggleAdvancedFilter(event)">Показать расширенный фильтр</a>
                 </div>
             </div>
-            
-            <fieldset>
-                <legend>Тип поиска</legend>
-                <input type="radio" id="search_dense" name="search_type" value="dense" {% if not hybrid and selected_search_type != 'sparse' %}checked{% endif %}>
-                <label for="search_dense">Плотные векторы (dense)</label><br>
-                <input type="radio" id="search_sparse" name="search_type" value="sparse" {% if selected_search_type == 'sparse' %}checked{% endif %}>
-                <label for="search_sparse">Разреженные векторы (BM25)</label><br>
-                <input type="radio" id="search_hybrid" name="search_type" value="hybrid" {% if hybrid %}checked{% endif %}>
-                <label for="search_hybrid">Гибридный режим (dense + BM25)</label><br>
-                <!-- Hidden field to store hybrid flag for backward compatibility -->
-                <input type="hidden" id="hybrid" name="hybrid" value="{{ 'True' if hybrid else 'False' }}">
-            </fieldset>
-            
-            {% if config.reranker_enabled %}
-            <fieldset>
-                <legend>Reranker</legend>
-                <input type="checkbox" id="use_reranker" name="use_reranker" value="True" {% if use_reranker != false %}checked{% endif %}>
-                <label for="use_reranker">Использовать reranker для переоценки результатов</label>
-            </fieldset>
-            {% endif %}
-            <button type="submit">Найти</button>
         </form>
         
         <!-- Индикатор загрузки -->
@@ -258,9 +258,200 @@
             {% endif %}
         </div>
     </main>
-    <script src="/static/ajax.js"></script>
     <script>
-        // Alpine.js теперь управляет видимостью advanced фильтра
+        // Функция для выполнения AJAX POST запроса
+        async function ajaxPost(url, data) {
+            const formData = new FormData();
+            for (const key in data) {
+                if (data.hasOwnProperty(key)) {
+                    formData.append(key, data[key]);
+                }
+            }
+            
+            const response = await fetch(url, {
+                method: 'POST',
+                body: formData,
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                }
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                return await response.json();
+            } else {
+                return await response.text();
+            }
+        }
+
+        // Функция для поиска документов
+        async function searchDocuments(query, collection, searchDevice, k, searchType, useReranker, filters) {
+            const data = {
+                query: query,
+                collection: collection,
+                search_device: searchDevice,
+                k: k,
+                search_type: searchType,
+                use_reranker: useReranker ? 'True' : 'False',
+                filter_author: filters.author || '',
+                filter_source: filters.source || '',
+                filter_file_extension: filters.fileExtension || '',
+                metadata_filter: filters.custom || ''
+            };
+            
+            // Добавляем hybrid параметр для обратной совместимости
+            if (searchType === 'hybrid') {
+                data.hybrid = 'True';
+            } else {
+                data.hybrid = 'False';
+            }
+            
+            return await ajaxPost('/api/search/', data);
+        }
+
+        // Функция для обновления результатов поиска
+        function updateSearchResults(htmlContent) {
+            const resultsContainer = document.getElementById('search-results-container');
+            if (resultsContainer) {
+                resultsContainer.innerHTML = htmlContent;
+            }
+        }
+
+        // Функция для отображения сообщения об ошибке
+        function showErrorMessage(message) {
+            const errorContainer = document.getElementById('error-message');
+            if (errorContainer) {
+                errorContainer.textContent = message;
+                errorContainer.style.display = 'block';
+            }
+        }
+
+        // Функция для скрытия сообщения об ошибке
+        function hideErrorMessage() {
+            const errorContainer = document.getElementById('error-message');
+            if (errorContainer) {
+                errorContainer.style.display = 'none';
+            }
+        }
+
+        // Функция для отображения индикатора загрузки
+        function showLoadingIndicator() {
+            const loadingIndicator = document.getElementById('loading-indicator');
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'block';
+            }
+        }
+
+        // Функция для скрытия индикатора загрузки
+        function hideLoadingIndicator() {
+            const loadingIndicator = document.getElementById('loading-indicator');
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'none';
+            }
+        }
+
+        // Функция для обработки отправки формы поиска
+        async function handleSearchSubmit(event) {
+            event.preventDefault();
+            
+            // Скрываем сообщения об ошибках
+            hideErrorMessage();
+            
+            // Отображаем индикатор загрузки
+            showLoadingIndicator();
+            
+            // Получаем значения из формы (из скрытых полей)
+            const query = document.getElementById('query').value;
+            const collection = document.getElementById('collection').value;
+            const searchDevice = document.getElementById('search_device').value;
+            const searchType = document.getElementById('search_type_hidden').value;
+            const useReranker = document.getElementById('use_reranker').value === 'True';
+            const k = document.getElementById('k').value;
+            
+            // Получаем значения фильтров
+            const filters = {
+                author: document.getElementById('filter_author') ? document.getElementById('filter_author').value : '',
+                source: document.getElementById('filter_source') ? document.getElementById('filter_source').value : '',
+                fileExtension: document.getElementById('filter_file_extension') ? document.getElementById('filter_file_extension').value : '',
+                custom: document.getElementById('metadata_filter') ? document.getElementById('metadata_filter').value : ''
+            };
+            
+            try {
+                // Выполняем поиск
+                const response = await searchDocuments(query, collection, searchDevice, k, searchType, useReranker, filters);
+                
+                // Обновляем результаты поиска
+                updateSearchResults(response);
+            } catch (error) {
+                console.error('Ошибка при выполнении поиска:', error);
+                showErrorMessage('Произошла ошибка при выполнении поиска. Пожалуйста, попробуйте еще раз.');
+            } finally {
+                // Скрываем индикатор загрузки
+                hideLoadingIndicator();
+            }
+        }
+
+        // Функция для инициализации обработчиков событий
+        function initAjaxHandlers() {
+            // Обработчик для формы поиска
+            const searchForm = document.getElementById('search-form');
+            if (searchForm) {
+                searchForm.addEventListener('submit', handleSearchSubmit);
+            }
+            
+            // Обработчик для спойлера фильтра по метаданным
+            const collapsible = document.querySelector('.collapsible');
+            if (collapsible) {
+                collapsible.addEventListener('click', function() {
+                    this.classList.toggle('active');
+                    const content = this.nextElementSibling;
+                    if (content.style.display === 'block') {
+                        content.style.display = 'none';
+                    } else {
+                        content.style.display = 'block';
+                    }
+                });
+            }
+        }
+
+        // Добавляем функцию для переключения фильтра
+        function toggleAdvancedFilter(event) {
+            const advancedFilterSection = document.getElementById('advanced-filter-section');
+            const toggleLink = event.target;
+            
+            if (advancedFilterSection.style.display === 'none' || !advancedFilterSection.style.display) {
+                advancedFilterSection.style.display = 'block';
+                event.target.textContent = 'Скрыть расширенный фильтр';
+            } else {
+                advancedFilterSection.style.display = 'none';
+                event.target.textContent = 'Показать расширенный фильтр';
+            }
+        }
+
+        // Инициализация при загрузке страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            // Обновление кнопки при загрузке страницы
+            const advancedFilterSection = document.getElementById('advanced-filter-section');
+            const toggleLink = document.getElementById('toggle-advanced-filter');
+            
+            if (advancedFilterSection && toggleLink) {
+                // Проверяем, есть ли значение в поле фильтра - если есть, показываем секцию
+                const filterField = document.getElementById('metadata_filter');
+                if (filterField && filterField.value) {
+                    advancedFilterSection.style.display = 'block';
+                    toggleLink.textContent = 'Скрыть расширенный фильтр';
+                } else {
+                    advancedFilterSection.style.display = 'none';
+                    toggleLink.textContent = 'Показать расширенный фильтр';
+                }
+            }
+            
+            initAjaxHandlers();
+        });
     </script>
 </body>
 </html>
