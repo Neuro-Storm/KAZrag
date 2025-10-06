@@ -8,7 +8,7 @@ from pathlib import Path
 from cachetools import TTLCache
 from pydantic import ValidationError
 
-from config.settings_model import Config
+from config.settings import Config
 from config.resource_path import resource_path
 
 logger = logging.getLogger(__name__)
