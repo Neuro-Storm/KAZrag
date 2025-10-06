@@ -8,7 +8,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Import resource path resolver
 from config.resource_path import resource_path
-from config.config_manager import ConfigManager
 
 
 class Config(BaseSettings):
@@ -185,9 +184,10 @@ def load_config(reload: bool = False) -> Config:
     Returns:
         Config: Объект конфигурации
     """
+    from config.config_manager import ConfigManager
     manager = ConfigManager.get_instance()
     if reload:
         return manager.reload()
     return manager.get()
 
-__all__ = ["Config", "ConfigManager", "CONFIG_FILE", "load_config"]
+__all__ = ["Config", "CONFIG_FILE", "load_config"]
