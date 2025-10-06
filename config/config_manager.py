@@ -1,4 +1,4 @@
-"""Module for centralized configuration management using pydantic-settings."""
+"""Модуль для централизованного управления конфигурацией с использованием pydantic-settings."""
 
 import json
 import logging
@@ -15,46 +15,46 @@ logger = logging.getLogger(__name__)
 
 
 class ConfigManager:
-    """Centralized configuration manager with caching and validation using pydantic-settings."""
+    """Централизованный менеджер конфигурации с кэшированием и валидацией с использованием pydantic-settings."""
     
     _instance: Optional['ConfigManager'] = None
     
     def __init__(self, cache_ttl: int = 60):
-        """Initialize ConfigManager.
+        """Инициализировать ConfigManager.
         
         Args:
-            cache_ttl: Time to live for cached configuration in seconds
+            cache_ttl: Время жизни кэшированной конфигурации в секундах
         """
         self.cache_ttl = cache_ttl
-        # Use TTLCache for configuration caching
+        # Использовать TTLCache для кэширования конфигурации
         self._cache = TTLCache(maxsize=1, ttl=cache_ttl)
         self._config_instance: Optional[Config] = None
         
     @classmethod
     def get_instance(cls, cache_ttl: int = 60) -> 'ConfigManager':
-        """Get singleton instance of ConfigManager.
+        """Получить singleton экземпляр ConfigManager.
         
         Args:
-            cache_ttl: Time to live for cached configuration in seconds
+            cache_ttl: Время жизни кэшированной конфигурации в секундах
             
         Returns:
-            ConfigManager: Singleton instance
+            ConfigManager: Singleton экземпляр
         """
         if cls._instance is None:
             cls._instance = cls(cache_ttl)
         return cls._instance
     
     def _load_config_from_file(self) -> Config:
-        """Load configuration from file without caching.
+        """Загрузить конфигурацию из файла без кэширования.
         
         Returns:
-            Config: Loaded configuration object
+            Config: Загруженный объект конфигурации
         """
-        logger.debug("Loading configuration from file")
+        logger.debug("Загрузка конфигурации из файла")
         config_file = resource_path("config/config.json")
         
         if not config_file.exists():
-            # Create default config if file doesn't exist
+            # Создать конфигурацию по умолчанию, если файл не существует
             config = Config()
             self.save(config)
             return config
@@ -63,125 +63,126 @@ class ConfigManager:
             with open(config_file, encoding="utf-8") as f:
                 config_dict = json.load(f)
                 
-            # Create Config object with validation
+            # Создать объект Config с валидацией
             config = Config(**config_dict)
             return config
             
         except ValidationError as e:
-            logger.exception(f"Configuration validation errors: {e.errors()}")
-            # Return default config if validation fails
+            logger.exception(f"Ошибки валидации конфигурации: {e.errors()}")
+            # Вернуть конфигурацию по умолчанию, если валидация не удалась
             config = Config()
             self.save(config)
             return config
             
         except Exception as e:
-            logger.exception(f"Error loading configuration: {e}")
-            # Return default config if any other error occurs
+            logger.exception(f"Ошибка загрузки конфигурации: {e}")
+            # Вернуть конфигурацию по умолчанию, если произошла любая другая ошибка
             config = Config()
             self.save(config)
             return config
     
     def _load_config_from_settings(self) -> Config:
-        """Load configuration from environment variables and settings.
+        """Загрузить конфигурацию из переменных окружения и настроек.
         
         Returns:
-            Config: Loaded configuration object
+            Config: Загруженный объект конфигурации
         """
         try:
-            # Load config from environment variables and defaults
+            # Загрузить конфигурацию из переменных окружения и значений по умолчанию
             config = Config()
             return config
         except Exception as e:
-            logger.exception(f"Error loading configuration from settings: {e}")
-            # Fallback to file-based config
+            logger.exception(f"Ошибка загрузки конфигурации из настроек: {e}")
+            # Откат к конфигурации на основе файла
             return self._load_config_from_file()
     
     def load(self) -> Config:
-        """Load configuration from file with caching.
+        """Загрузить конфигурацию из файла с кэшированием.
         
         Returns:
-            Config: Loaded configuration object
+            Config: Загруженный объект конфигурации
         """
-        # Check if we have a valid cached config
+        # Проверить, есть ли у нас действительная кэшированная конфигурация
         if 'config' in self._cache:
-            logger.debug("Returning cached configuration")
+            logger.debug("Возврат кэшированной конфигурации")
             return self._cache['config']
         
-        # Try to load from file first
+        # Сначала попробовать загрузить из файла
         try:
             config = self._load_config_from_file()
         except Exception as e:
-            logger.warning(f"Failed to load config from file, falling back to settings: {e}")
-            # Fallback to settings-based config
+            logger.warning(f"Не удалось загрузить конфигурацию из файла, возврат к настройкам: {e}")
+            # Откат к конфигурации на основе настроек
             config = self._load_config_from_settings()
         
-        # Update cache
+        # Обновить кэш
         self._cache['config'] = config
         
         return config
     
     def save(self, config: Config) -> None:
-        """Save configuration to file.
+        """Сохранить конфигурацию в файл.
         
         Args:
-            config: Configuration object to save
+            config: Объект конфигурации для сохранения
         """
         try:
-            # Save to file
+            # Сохранить в файл
             config.save_to_file()
             
-            # Update cache
+            # Обновить кэш
             self._cache['config'] = config
             
-            logger.info("Configuration saved successfully")
+            logger.info("Конфигурация успешно сохранена")
             
         except Exception as e:
-            logger.exception(f"Error saving configuration: {e}")
+            logger.exception(f"Ошибка сохранения конфигурации: {e}")
             raise
     
     def get(self) -> Config:
-        """Get configuration (alias for load).
+        """Получить конфигурацию (алиас для load).
         
         Returns:
-            Config: Configuration object
+            Config: Объект конфигурации
         """
         return self.load()
     
     def reload(self) -> Config:
-        """Force reload configuration from file, bypassing cache.
+        """Принудительно перезагрузить конфигурацию из файла, обходя кэш.
         
         Returns:
-            Config: Reloaded configuration object
+            Config: Перезагруженный объект конфигурации
         """
-        # Clear the cache
+        # Очистить кэш
         self._cache.clear()
         
-        # Load fresh config
+        # Загрузить свежую конфигурацию
         return self.load()
     
     def update_from_dict(self, updates: Dict[str, Any]) -> Config:
-        """Update configuration from dictionary.
+        """Обновить конфигурацию из словаря.
         
         Args:
-            updates: Dictionary with configuration updates
+            updates: Словарь с обновлениями конфигурации
             
         Returns:
-            Config: Updated configuration object
+            Config: Обновленный объект конфигурации
         """
         try:
-            # Get current config
+            # Получить текущую конфигурацию
             current_config = self.get()
             
-            # Convert to dict and update
+            # Преобразовать в словарь и обновить
             config_dict = current_config.model_dump()
             config_dict.update(updates)
             
-            # Validate new BM25 fields
+            # Обновить объект конфигурации
+            config = current_config
             if 'use_bm25' in updates:
                 config.use_bm25 = updates['use_bm25']
                 config.sparse_vector_name = updates.get('sparse_vector_name', config.sparse_vector_name)
             
-            # Validate new RAG fields
+            # Обновить поля RAG
             if any(key in updates for key in ['rag_enabled', 'rag_model_path', 'rag_system_prompt', 'rag_top_k', 'rag_max_tokens', 'rag_temperature', 'rag_context_size', 'rag_gpu_layers', 'rag_threads', 'rag_batch_size', 'rag_beam_size']):
                 config.rag_enabled = updates.get('rag_enabled', config.rag_enabled)
                 config.rag_model_path = updates.get('rag_model_path', config.rag_model_path)
@@ -195,14 +196,14 @@ class ConfigManager:
                 config.rag_batch_size = updates.get('rag_batch_size', config.rag_batch_size)
                 config.rag_beam_size = updates.get('rag_beam_size', config.rag_beam_size)
             
-            # Create new config object
+            # Создать новый объект конфигурации
             updated_config = Config(**config_dict)
             
-            # Save updated config
+            # Сохранить обновленную конфигурацию
             self.save(updated_config)
             
             return updated_config
             
         except Exception as e:
-            logger.exception(f"Error updating configuration: {e}")
+            logger.exception(f"Ошибка обновления конфигурации: {e}")
             raise
