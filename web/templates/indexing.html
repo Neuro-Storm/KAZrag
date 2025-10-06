@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Индексация документов</title>
+    <link rel="stylesheet" href="/static/simple.min.css">
+    <style>
+        .status-message {
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+        }
+        .status-success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status-info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .controls-section {
+            margin: 1rem 0;
+            padding: 1rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .collection-list {
+            margin: 1rem 0;
+        }
+        .collection-item {
+            padding: 0.5rem;
+            margin: 0.25rem 0;
+            border: 1px solid #eee;
+            border-radius: 3px;
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Индексация и Конвертация документов</h1>
+        <nav>
+            <a href="/api/admin/settings/">Настройки</a> |
+            <a href="/api/indexing/">Индексация</a> |
+            <a href="/api/search/">Поиск</a>
+        </nav>
+    </header>
+    
+    <main>
+        {% if status_message %}
+            <div class="status-message status-{{ status_type }}">
+                {{ status_message }}
+            </div>
+        {% endif %}
+        
+        {% if error %}
+            <div class="status-message status-error">
+                {{ error }}
+            </div>
+        {% endif %}
+        
+        <div class="controls-section">
+            <h2>Конфигурация индексации</h2>
+            <p><strong>Папка для индексации:</strong> {{ config.folder_path }}</p>
+            <p><strong>Имя коллекции:</strong> {{ config.collection_name }}</p>
+            <p><strong>Модель эмбеддингов:</strong> {{ config.current_hf_model }}</p>
+            <p><strong>Устройство:</strong> {{ config.device }}</p>
+        </div>
+        
+        <div class="controls-section">
+            <h2>Запуск процессов</h2>
+            
+            <div>
+                <h3>Индексация документов</h3>
+                <button id="run-indexing-btn" onclick="runIndexing()">Запустить индексацию</button>
+                <div id="indexing-status" style="margin-top: 1rem;"></div>
+            </div>
+            
+            <hr style="margin: 1rem 0;">
+            
+            <div>
+                <h3>Конвертация файлов</h3>
+                <p><strong>Входная директория:</strong> {{ config.mineru_input_pdf_dir }}</p>
+                <p><strong>Выходная директория:</strong> {{ config.mineru_output_md_dir }}</p>
+                <button id="process-files-btn" onclick="processFiles()">Запустить конвертацию</button>
+                <div id="conversion-status" style="margin-top: 1rem;"></div>
+            </div>
+        </div>
+        
+        <div class="controls-section">
+            <h2>Доступные коллекции</h2>
+            {% if collections %}
+                <ul class="collection-list">
+                    {% for collection in collections %}
+                        <li class="collection-item">
+                            <span>{{ collection.name }} (векторов: {{ collection.points_count }})</span>
+                            <button class="delete-collection-btn" onclick="deleteCollection('{{ collection.name }}')" style="float: right; margin-left: 10px;">Удалить</button>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p>Нет доступных коллекций</p>
+            {% endif %}
+        </div>
+    </main>
+    
+    <script>
+        async function runIndexing() {
+            const button = document.getElementById('run-indexing-btn');
+            const statusDiv = document.getElementById('indexing-status');
+            
+            button.disabled = true;
+            button.textContent = 'Запуск...';
+            statusDiv.textContent = 'Отправка запроса на индексацию...';
+            
+            try {
+                const response = await fetch('/api/indexing/run-indexing', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'indexing_started') {
+                    statusDiv.innerHTML = '<span style="color: green;">✓</span> ' + data.message;
+                } else {
+                    statusDiv.innerHTML = '<span style="color: red;">✗ Ошибка:</span> ' + data.message;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = '<span style="color: red;">✗ Ошибка подключения:</span> ' + error.message;
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Запустить индексацию';
+            }
+        }
+        
+        async function processFiles() {
+            const button = document.getElementById('process-files-btn');
+            const statusDiv = document.getElementById('conversion-status');
+            
+            button.disabled = true;
+            button.textContent = 'Запуск...';
+            statusDiv.textContent = 'Отправка запроса на конвертацию...';
+            
+            try {
+                const response = await fetch('/api/indexing/process-files', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'processing_started') {
+                    statusDiv.innerHTML = '<span style="color: green;">✓</span> ' + data.message;
+                } else {
+                    statusDiv.innerHTML = '<span style="color: red;">✗ Ошибка:</span> ' + data.message;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = '<span style="color: red;">✗ Ошибка подключения:</span> ' + error.message;
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Запустить конвертацию';
+            }
+        }
+        
+        async function deleteCollection(collectionName) {
+            if (!confirm(`Вы уверены, что хотите удалить коллекцию "${collectionName}"? Это действие необратимо.`)) {
+                return;
+            }
+            
+            const deleteBtn = event.target;
+            const collectionItem = deleteBtn.parentElement;
+            const originalText = deleteBtn.textContent;
+            
+            deleteBtn.disabled = true;
+            deleteBtn.textContent = 'Удаление...';
+            
+            try {
+                const response = await fetch('/api/indexing/delete-collection', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ collection_name: collectionName })
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'deleted') {
+                    collectionItem.remove();
+                    // Показываем сообщение об успешном удалении
+                    const statusDiv = document.createElement('div');
+                    statusDiv.className = 'status-message status-success';
+                    statusDiv.textContent = `Коллекция "${collectionName}" успешно удалена`;
+                    document.querySelector('main').insertBefore(statusDiv, document.querySelector('.controls-section'));
+                    
+                    setTimeout(() => {
+                        statusDiv.remove();
+                    }, 5000);
+                } else {
+                    alert('Ошибка при удалении коллекции: ' + (data.message || 'Неизвестная ошибка'));
+                    deleteBtn.disabled = false;
+                    deleteBtn.textContent = originalText;
+                }
+            } catch (error) {
+                alert('Ошибка подключения при удалении коллекции: ' + error.message);
+                deleteBtn.disabled = false;
+                deleteBtn.textContent = originalText;
+            }
+        }
+    </script>
+</body>
+</html>

@@ -43,7 +43,7 @@
 <body>
     <header>
         <h1>Настройки и Управление</h1>
-        <nav><a href="/">Поиск</a> <a href="/settings/">Настройки</a></nav>
+        <nav><a href="/api/search/">Поиск</a> <a href="/api/admin/settings/">Настройки</a> <a href="/api/indexing/">Индексация</a></nav>
     </header>
     <main x-data="{
         activeTab: (new URLSearchParams(window.location.search)).get('tab') || 'indexing',
@@ -113,76 +113,8 @@
                 this.isProcessing = false;
             }
         },
-        async runIndexing() {
-            // Показываем индикатор прогресса
-            this.isProcessing = true;
-            
-            try {
-                // Отправляем данные через fetch
-                const response = await fetch('/api/admin/run-indexing', {
-                    method: 'POST',
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                
-                // Обрабатываем ответ
-                if (data.status === 'indexing_started') {
-                    this.showSuccessMessage('Индексация запущена в фоновом режиме.');
-                } else if (data.status === 'error') {
-                    this.showErrorMessage(data.message || 'Ошибка запуска индексации.');
-                } else {
-                    this.showSuccessMessage('Индексация запущена.');
-                }
-            } catch (error) {
-                console.error('Error starting indexing:', error);
-                this.showErrorMessage('Ошибка запуска индексации: ' + error.message);
-            } finally {
-                // Скрываем индикатор прогресса
-                this.isProcessing = false;
-            }
-        },
-        async processFiles() {
-            // Показываем индикатор прогресса
-            this.isProcessing = true;
-            
-            try {
-                // Отправляем данные через fetch
-                const response = await fetch('/api/admin/process-files', {
-                    method: 'POST',
-                    headers: {
-                        'X-Requested-With': 'XMLHttpRequest'
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                
-                // Обрабатываем ответ
-                if (data.status === 'processing_started') {
-                    this.showSuccessMessage('Обработка файлов запущена в фоновом режиме.');
-                } else if (data.status === 'error') {
-                    this.showErrorMessage(data.message || 'Ошибка запуска обработки файлов.');
-                } else {
-                    this.showSuccessMessage('Обработка файлов запущена.');
-                }
-            } catch (error) {
-                console.error('Error starting file processing:', error);
-                this.showErrorMessage('Ошибка запуска обработки файлов: ' + error.message);
-            } finally {
-                // Скрываем индикатор прогресса
-                this.isProcessing = false;
-            }
-        }
+
+
     }">
         {% if status and status_message %}
             <div class="status-msg {{ status_type }}">
@@ -477,16 +409,6 @@
                 </form>
             </div>
             
-            <div class="module-card">
-                <h3>Управление индексом</h3>
-                <p>Проиндексировать данные из <strong>{{ config.folder_path }}</strong> в коллекцию <strong>{{ config.collection_name }}</strong>.</p>
-                <form action="/api/admin/run-indexing" method="post" class="action-form" data-action="run-indexing" @submit.prevent="runIndexing">
-                    <button type="submit" :disabled="isProcessing">Запустить индексацию</button>
-                    <div class="progress" x-show="isProcessing">
-                        <span class="spinner"></span> Индексация запущена в фоновом режиме...
-                    </div>
-                </form>
-            </div>
         </div>
         
         <!-- Conversion Module -->
@@ -569,17 +491,9 @@
                 </form>
             </div>
             
-            <div class="module-card">
-                <h3>Обработка файлов различных форматов</h3>
-                <p>Преобразовать файлы различных форматов из <strong>{{ config.mineru_input_pdf_dir }}</strong> в Markdown и сохранить в <strong>{{ config.mineru_output_md_dir }}</strong>.</p>
-                <form action="/api/admin/process-files" method="post" class="action-form" data-action="process-files" @submit.prevent="processFiles">
-                    <button type="submit" :disabled="isProcessing">Запустить обработку файлов</button>
-                    <div class="progress" x-show="isProcessing">
-                        <span class="spinner"></span> Обработка файлов запущена в фоновом режиме...
-                    </div>
-                </form>
-            </div>
         </div>
+        
+
         
         <!-- Embedding Module -->
         <div id="embedding-module" class="module-content" x-show="activeTab === 'embedding'">

@@ -106,4 +106,10 @@ def create_app() -> FastAPI:
         """Settings route - redirects to admin panel"""
         return RedirectResponse(url="/api/admin/settings/")
     
+    # Add indexing route that redirects to indexing page
+    @app.get("/indexing", response_class=RedirectResponse)
+    async def indexing_redirect():
+        """Indexing route - redirects to indexing page"""
+        return RedirectResponse(url="/api/indexing/")
+    
     return app

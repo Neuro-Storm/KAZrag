@@ -13,8 +13,7 @@ from fastapi.templating import Jinja2Templates
 
 from config.config_manager import ConfigManager
 from config.settings import Config
-from core.converting.multi_format_converter import convert_files_to_md
-from core.indexing.indexer import run_indexing_logic
+
 from core.qdrant.qdrant_collections import (
     get_cached_collections,
     refresh_collections_cache,
@@ -71,7 +70,10 @@ def get_templates():
     """Get or create Jinja2Templates instance."""
     global _templates
     if _templates is None:
-        _templates = Jinja2Templates(directory="web/templates")
+        from pathlib import Path
+        # Используем абсолютный путь от корня проекта
+        templates_dir = Path(__file__).parent / "templates"
+        _templates = Jinja2Templates(directory=str(templates_dir))
     return _templates
 
 
@@ -744,84 +746,3 @@ async def update_settings(
             return RedirectResponse(url=f"/settings?status=save_error&tab={active_tab}", status_code=303)
 
 
-@app.post("/run-indexing", response_class=RedirectResponse)
-async def run_indexing(request: Request, background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config), client = Depends(get_client)):
-    """Запускает процесс индексации документов."""
-    request_id = get_request_id(request)
-    logger.info(f"[{request_id}] Run indexing request by user: {username}")
-    
-    try:
-        # Use the synchronous wrapper for the indexing logic
-        from core.indexing.indexer import run_indexing_logic_sync
-        background_tasks.add_task(run_indexing_logic_sync, client=client)
-        logger.info(f"[{request_id}] Indexing task scheduled successfully")
-        
-        # Проверяем, является ли запрос AJAX запросом
-        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
-        
-        if is_ajax:
-            # Для AJAX запросов возвращаем JSON ответ
-            return JSONResponse(content={"status": "indexing_started"})
-        else:
-            # Для обычных запросов возвращаем редирект с информацией о активной вкладке
-            # При запуске индексации обычно активна вкладка индексации
-            return RedirectResponse(url="/settings?status=indexing_started&tab=indexing", status_code=303)
-            
-    except Exception as e:
-        logger.exception(f"[{request_id}] Error scheduling indexing task: {str(e)}")
-        # Проверяем, является ли запрос AJAX запросом
-        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
-        
-        if is_ajax:
-            # Для AJAX запросов возвращаем JSON ответ
-            return JSONResponse(content={"status": "error", "message": "Ошибка запуска индексации"})
-        else:
-            # Для обычных запросов возвращаем редирект с сообщением об ошибке
-            # При ошибке индексации обычно активна вкладка индексации
-            return RedirectResponse(url="/settings?status=indexing_error&tab=indexing", status_code=303)
-
-
-# Эндпоинт для обработки файлов различных форматов
-@app.post("/process-files", response_class=RedirectResponse)
-async def process_files_endpoint(request: Request, background_tasks: BackgroundTasks, username: str = Depends(verify_admin_access_from_form), config: Config = Depends(get_config)):
-    """Запускает процесс обработки файлов различных форматов."""
-    request_id = get_request_id(request)
-    logger.info(f"[{request_id}] Process files request by user: {username}")
-    
-    try:
-        # Запускаем обработку файлов в фоновом режиме
-        config = config_manager.get()
-        
-        # Create a sync wrapper function to run the potentially long-running task
-        def run_convert_files_sync():
-            convert_files_to_md(
-                input_dir=config.mineru_input_pdf_dir,
-                output_dir=config.mineru_output_md_dir
-            )
-        
-        background_tasks.add_task(run_convert_files_sync)
-        logger.info(f"[{request_id}] Multi-format processing task scheduled successfully")
-        
-        # Проверяем, является ли запрос AJAX запросом
-        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
-        
-        if is_ajax:
-            # Для AJAX запросов возвращаем JSON ответ
-            return JSONResponse(content={"status": "processing_started"})
-        else:
-            # Для обычных запросов возвращаем редирект с информацией о активной вкладке
-            # При запуске обработки файлов обычно активна вкладка конвертации
-            return RedirectResponse(url="/settings?status=processing_started&tab=conversion", status_code=303)
-            
-    except Exception as e:
-        logger.exception(f"[{request_id}] Error scheduling file processing task: {str(e)}")
-        # Проверяем, является ли запрос AJAX запросом
-        is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
-        
-        if is_ajax:
-            # Для AJAX запросов возвращаем JSON ответ
-            return JSONResponse(content={"status": "error", "message": "Ошибка запуска обработки файлов"})
-        else:
-            # Для обычных запросов возвращаем редирект с сообщением об ошибке
-            # При ошибке обработки файлов обычно активна вкладка конвертации
-            return RedirectResponse(url="/settings?status=processing_error&tab=conversion", status_code=303)

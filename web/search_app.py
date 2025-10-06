@@ -27,7 +27,10 @@ def get_templates():
     """Get or create Jinja2Templates instance."""
     global _templates
     if _templates is None:
-        _templates = Jinja2Templates(directory="web/templates")
+        from pathlib import Path
+        # Используем абсолютный путь от корня проекта
+        templates_dir = Path(__file__).parent / "templates"
+        _templates = Jinja2Templates(directory=str(templates_dir))
     return _templates
 
 

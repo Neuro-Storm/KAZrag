@@ -101,8 +101,8 @@ def add_exception_handlers(app: FastAPI) -> None:
             f"Path: {request.url.path}, Method: {request.method}"
         )
         
-        # Special handling for 401 Unauthorized in admin routes
-        if exc.status_code == 401 and request.url.path.startswith("/api/admin/"):
+        # Special handling for 401 Unauthorized in admin and indexing routes
+        if exc.status_code == 401 and (request.url.path.startswith("/api/admin/") or request.url.path.startswith("/api/indexing/")):
             # For AJAX requests, return JSON response
             if request.headers.get("accept", "").startswith("application/json") or \
                request.headers.get("content-type", "").startswith("application/json"):
@@ -117,7 +117,7 @@ def add_exception_handlers(app: FastAPI) -> None:
                     }
                 )
             
-            # For HTML requests to admin routes, return a more informative error page
+            # For HTML requests to admin/indexing routes, return a more informative error page
             from fastapi.responses import HTMLResponse
             return HTMLResponse(
                 content=f"""
