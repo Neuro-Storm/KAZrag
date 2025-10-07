@@ -44,11 +44,22 @@ class LlamaService:
     
     def _load_model(self):
         """Загрузка модели (ленивая)."""
+        logger.info(f"Попытка загрузки модели: {self.model_path}")
         if not self.model_path.exists():
             logger.error(f"Модель не найдена: {self.model_path}")
+            # Check if the parent directory exists
+            if not self.model_path.parent.exists():
+                logger.error(f"Директория модели не существует: {self.model_path.parent}")
+                # Try to create the directory
+                try:
+                    self.model_path.parent.mkdir(parents=True, exist_ok=True)
+                    logger.info(f"Создана директория модели: {self.model_path.parent}")
+                except Exception as mkdir_error:
+                    logger.error(f"Не удалось создать директорию модели: {mkdir_error}")
             return
         
         try:
+            logger.info(f"Параметры загрузки модели: model_path={self.model_path}, n_ctx={self.n_ctx}, n_gpu_layers={self.n_gpu_layers}, n_threads={self.n_threads}, n_batch={self.n_batch}")
             self.llm = Llama(
                 model_path=str(self.model_path),
                 n_ctx=self.n_ctx,
@@ -58,8 +69,17 @@ class LlamaService:
                 verbose=self.verbose,
             )
             logger.info(f"Модель загружена: {self.model_path} (context={self.n_ctx}, gpu_layers={self.n_gpu_layers}, threads={self.n_threads})")
+        except ValueError as ve:
+            # Specifically handle the "Failed to load model from file" error from llama_cpp
+            if "Failed to load model from file" in str(ve):
+                logger.error(f"Файл модели существует, но не может быть загружен: {self.model_path}")
+                logger.error(f"Возможные причины: поврежденный файл, неподдерживаемый формат GGUF, или проблемы совместимости")
+                logger.error(f"Попробуйте скачать модель заново или использовать другую GGUF-модель")
+            logger.error(f"Ошибка загрузки модели {self.model_path}: {ve}")
+            self.llm = None
         except Exception as e:
             logger.error(f"Ошибка загрузки модели {self.model_path}: {e}")
+            logger.exception("Полная ошибка загрузки модели")  # Добавляем полный стек ошибки
             self.llm = None
     
     def generate(
@@ -145,7 +165,8 @@ def get_llm_service(config) -> Optional[LlamaService]:
         'n_gpu_layers': config.rag_gpu_layers,
         'n_threads': config.rag_threads,
         'n_batch': config.rag_batch_size,
-        'n_beams': config.rag_beam_size
+        'n_beams': config.rag_beam_size,
+        'rag_enabled': config.rag_enabled  # Добавляем флаг enabled в параметры для отслеживания изменений
     }
     
     if config.rag_enabled:
@@ -153,16 +174,30 @@ def get_llm_service(config) -> Optional[LlamaService]:
         if _llm_service is None or _llm_service_params != current_params:
             from config.resource_path import resource_path
             model_path = resource_path(config.rag_model_path)
-            _llm_service = LlamaService(
-                str(model_path), 
-                n_ctx=config.rag_context_size,
-                n_gpu_layers=config.rag_gpu_layers,
-                n_threads=config.rag_threads,
-                n_batch=config.rag_batch_size,
-                n_beams=config.rag_beam_size
-            )
-            _llm_service_params = current_params
-            logger.info(f"LLM сервис пересоздан с новыми параметрами: {current_params}")
+            try:
+                # Create the LlamaService and check if the model was loaded successfully
+                new_service = LlamaService(
+                    str(model_path), 
+                    n_ctx=config.rag_context_size,
+                    n_gpu_layers=config.rag_gpu_layers,
+                    n_threads=config.rag_threads,
+                    n_batch=config.rag_batch_size,
+                    n_beams=config.rag_beam_size
+                )
+                # Only update the global service if the model loaded successfully
+                if new_service.llm is not None:
+                    _llm_service = new_service
+                    _llm_service_params = current_params
+                    logger.info(f"LLM сервис пересоздан с новыми параметрами: {current_params}")
+                else:
+                    logger.warning("LLM сервис не может быть создан - модель не загружена")
+                    _llm_service = None
+                    _llm_service_params = None
+            except Exception as e:
+                logger.error(f"Ошибка при создании LLM сервиса: {e}")
+                logger.exception("Полная ошибка при создании LLM сервиса")
+                _llm_service = None
+                _llm_service_params = None
     else:
         # Если RAG отключен, сбрасываем сервис
         _llm_service = None

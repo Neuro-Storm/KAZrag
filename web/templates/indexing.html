@@ -68,7 +68,20 @@
         
         <div class="controls-section">
             <h2>Конфигурация индексации</h2>
-            <p><strong>Папка для индексации:</strong> {{ config.folder_path }}</p>
+            <form id="update-paths-form" method="post" action="/api/indexing/update-paths">
+                <p><strong>Папка для индексации:</strong></p>
+                <input type="text" name="indexing_folder" id="indexing_folder" value="{{ config.folder_path }}" style="width: 100%; padding: 0.5rem; margin: 0.25rem 0;"/>
+                
+                <p><strong>Входная директория для конвертации:</strong></p>
+                <input type="text" name="input_pdf_dir" id="input_pdf_dir" value="{{ config.mineru_input_pdf_dir }}" style="width: 100%; padding: 0.5rem; margin: 0.25rem 0;"/>
+                
+                <p><strong>Выходная директория для сохранения MD:</strong></p>
+                <input type="text" name="output_md_dir" id="output_md_dir" value="{{ config.mineru_output_md_dir }}" style="width: 100%; padding: 0.5rem; margin: 0.25rem 0;"/>
+                
+                <button type="submit">Обновить пути</button>
+            </form>
+            <div id="paths-status" style="margin-top: 1rem;"></div>
+            
             <p><strong>Имя коллекции:</strong> {{ config.collection_name }}</p>
             <p><strong>Модель эмбеддингов:</strong> {{ config.current_hf_model }}</p>
             <p><strong>Устройство:</strong> {{ config.device }}</p>
@@ -219,6 +232,50 @@
                 deleteBtn.textContent = originalText;
             }
         }
+        
+        // Обработчик формы обновления путей
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('update-paths-form');
+            if (form) {
+                form.addEventListener('submit', async function(e) {
+                    e.preventDefault(); // Предотвращаем стандартную отправку формы
+                    
+                    const statusDiv = document.getElementById('paths-status');
+                    const submitBtn = form.querySelector('button[type="submit"]');
+                    
+                    // Получаем значения из формы
+                    const formData = new FormData(form);
+                    
+                    submitBtn.disabled = true;
+                    submitBtn.textContent = 'Обновление...';
+                    statusDiv.textContent = 'Отправка запроса на обновление путей...';
+                    
+                    try {
+                        const response = await fetch('/api/indexing/update-paths', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        const data = await response.json();
+                        
+                        if (data.status === 'success') {
+                            statusDiv.innerHTML = '<span style="color: green;">✓</span> ' + data.message;
+                            // Обновляем значения в полях формы
+                            document.getElementById('indexing_folder').value = data.paths.indexing_folder;
+                            document.getElementById('input_pdf_dir').value = data.paths.input_pdf_dir;
+                            document.getElementById('output_md_dir').value = data.paths.output_md_dir;
+                        } else {
+                            statusDiv.innerHTML = '<span style="color: red;">✗ Ошибка:</span> ' + data.message;
+                        }
+                    } catch (error) {
+                        statusDiv.innerHTML = '<span style="color: red;">✗ Ошибка подключения:</span> ' + error.message;
+                    } finally {
+                        submitBtn.disabled = false;
+                        submitBtn.textContent = 'Обновить пути';
+                    }
+                });
+            }
+        });
     </script>
 </body>
 </html>

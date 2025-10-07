@@ -1,31 +1,79 @@
-"""Module for converting various file formats to Markdown."""
+"""Упрощенный конвертер форматов с использованием Docling."""
 
 import logging
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Optional, Callable
 
-from config.config_manager import ConfigManager
-
-# Import the new file processor
-from .file_processor import FileProcessor
-
-# Import the new converter manager
-from .manager import ConverterManager
-
-# Import the PDF converter
+from core.converting.docling_converter import DoclingConverter
 
 logger = logging.getLogger(__name__)
 
-# Get singleton instance of ConfigManager
-config_manager = ConfigManager.get_instance()
 
-# Get singleton instance of ConverterManager
-_converter_manager = ConverterManager()
+class MultiFormatConverter:
+    """Упрощенный конвертер форматов с использованием Docling."""
+    
+    def __init__(self):
+        """Инициализация конвертера."""
+        self.docling_converter = DoclingConverter()
+        logger.info("MultiFormatConverter инициализирован с Docling")
+    
+    def convert_files(
+        self, 
+        input_dir: str, 
+        output_dir: str,
+        progress_callback: Optional[Callable[[int, int], None]] = None
+    ) -> Dict[str, List[Path]]:
+        """Конвертировать файлы из входной директории в выходную.
+        
+        Args:
+            input_dir: Путь к входной директории
+            output_dir: Путь к выходной директории
+            progress_callback: Опциональная функция обратного вызова для прогресса
+            
+        Returns:
+            Dict[str, List[Path]]: Результаты конвертации по файлам
+        """
+        input_path = Path(input_dir)
+        output_path = Path(output_dir)
+        
+        # Проверка существования входной директории
+        if not input_path.exists():
+            raise FileNotFoundError(f"Входная директория не найдена: {input_dir}")
+        
+        # Создание выходной директории
+        output_path.mkdir(parents=True, exist_ok=True)
+        
+        # Конвертация файлов
+        return self.docling_converter.convert_directory(input_path, output_path, progress_callback)
+    
+    def is_supported(self, file_path: str) -> bool:
+        """Проверить, поддерживается ли формат файла.
+        
+        Args:
+            file_path: Путь к файлу
+            
+        Returns:
+            bool: True, если формат поддерживается
+        """
+        return self.docling_converter.is_supported(Path(file_path))
+    
+    def get_supported_formats(self) -> List[str]:
+        """Получить список поддерживаемых форматов.
+        
+        Returns:
+            List[str]: Список поддерживаемых форматов
+        """
+        return self.docling_converter.get_supported_formats()
+    
+    def reload_config(self):
+        """Перезагрузить конфигурацию конвертера."""
+        self.docling_converter.reload_config()
+        logger.info("Конфигурация MultiFormatConverter перезагружена")
 
 
-def convert_files_to_md(input_dir: str, output_dir: str) -> Tuple[bool, str]:
+def convert_files_to_md(input_dir: str, output_dir: str) -> tuple[bool, str]:
     """
-    Convert files of various formats to Markdown using the new FileProcessor.
+    Convert files of various formats to Markdown using Docling.
     
     Args:
         input_dir (str): Directory containing files to convert
@@ -35,6 +83,8 @@ def convert_files_to_md(input_dir: str, output_dir: str) -> Tuple[bool, str]:
         Tuple[bool, str]: (success, status message)
     """
     try:
+        converter = MultiFormatConverter()
+        
         input_path = Path(input_dir)
         output_path = Path(output_dir)
         
@@ -44,27 +94,20 @@ def convert_files_to_md(input_dir: str, output_dir: str) -> Tuple[bool, str]:
         # Create output directory if it doesn't exist
         output_path.mkdir(parents=True, exist_ok=True)
         
-        # Initialize file processor
-        file_processor = FileProcessor()
+        # Convert files
+        results = converter.convert_files(input_dir, output_dir)
         
-        # Scan directory for files
-        files_by_type = file_processor.scan_directory(input_path, recursive=True)
+        # Count total files processed
+        successful_conversions = 0
+        for file_results in results.values():
+            if file_results:  # If there are results for this file
+                successful_conversions += 1
         
-        # Get statistics
-        stats = file_processor.get_statistics(files_by_type)
-        logger.info(f"Found files: {stats}")
+        if successful_conversions == 0:
+            logger.warning("No files were successfully converted")
+        else:
+            logger.info(f"Successfully converted {successful_conversions} files to Markdown")
         
-        # Process files
-        results = file_processor.process_files(files_by_type, output_path, _converter_manager)
-        
-        # Count successful conversions
-        successful_conversions = sum(1 for result in results if result.success)
-        failed_conversions = len(results) - successful_conversions
-        
-        if failed_conversions > 0:
-            logger.warning(f"{failed_conversions} files failed to convert")
-            
-        logger.info(f"Successfully converted {successful_conversions} files to Markdown")
         return True, f"converted_{successful_conversions}_files"
         
     except Exception as e:
@@ -79,11 +122,5 @@ def get_supported_formats() -> List[str]:
     Returns:
         List[str]: List of supported formats
     """
-    # Start with formats handled by MinerU
-    formats = ['.pdf', '.djvu', '.jpg', '.jpeg', '.png']
-    
-    # Add formats supported by our converters
-    formats.extend(_converter_manager.get_supported_extensions())
-    
-    # Remove duplicates and return
-    return list(set(formats))
+    converter = MultiFormatConverter()
+    return converter.get_supported_formats()

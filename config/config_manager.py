@@ -176,26 +176,6 @@ class ConfigManager:
             config_dict = current_config.model_dump()
             config_dict.update(updates)
             
-            # Обновить объект конфигурации
-            config = current_config
-            if 'use_bm25' in updates:
-                config.use_bm25 = updates['use_bm25']
-                config.sparse_vector_name = updates.get('sparse_vector_name', config.sparse_vector_name)
-            
-            # Обновить поля RAG
-            if any(key in updates for key in ['rag_enabled', 'rag_model_path', 'rag_system_prompt', 'rag_top_k', 'rag_max_tokens', 'rag_temperature', 'rag_context_size', 'rag_gpu_layers', 'rag_threads', 'rag_batch_size', 'rag_beam_size']):
-                config.rag_enabled = updates.get('rag_enabled', config.rag_enabled)
-                config.rag_model_path = updates.get('rag_model_path', config.rag_model_path)
-                config.rag_system_prompt = updates.get('rag_system_prompt', config.rag_system_prompt)
-                config.rag_top_k = updates.get('rag_top_k', config.rag_top_k)
-                config.rag_max_tokens = updates.get('rag_max_tokens', config.rag_max_tokens)
-                config.rag_temperature = updates.get('rag_temperature', config.rag_temperature)
-                config.rag_context_size = updates.get('rag_context_size', config.rag_context_size)
-                config.rag_gpu_layers = updates.get('rag_gpu_layers', config.rag_gpu_layers)
-                config.rag_threads = updates.get('rag_threads', config.rag_threads)
-                config.rag_batch_size = updates.get('rag_batch_size', config.rag_batch_size)
-                config.rag_beam_size = updates.get('rag_beam_size', config.rag_beam_size)
-            
             # Создать новый объект конфигурации
             updated_config = Config(**config_dict)
             

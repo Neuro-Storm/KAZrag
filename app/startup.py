@@ -35,6 +35,16 @@ def startup_event_handler() -> None:
                 logger.info("BM25 collection configuration initialized successfully")
             except Exception as e:
                 logger.exception(f"Error initializing BM25 collection configuration: {e}")
+        
+        # Initialize Docling converter
+        logger.info("Initializing Docling converter")
+        try:
+            from core.converting.docling_converter import DoclingConverter
+            docling_converter = DoclingConverter()
+            logger.info("Docling converter initialized successfully")
+        except Exception as e:
+            logger.exception(f"Error initializing Docling converter: {e}")
+            
     except Exception as e:
         logger.exception(f"Error loading configuration: {e}")
         # Don't exit here, as we want the app to start even if config has issues

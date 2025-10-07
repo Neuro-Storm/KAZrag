@@ -80,7 +80,7 @@ class Config(BaseSettings):
     # Настройки Qdrant
     qdrant_url: str = "http://localhost:6333"
     
-    # Настройки MinerU
+    # Настройки MinerU (временно сохраняем для обратной совместимости, будет удалено при переходе на Docling)
     mineru_input_pdf_dir: str = "./pdfs_to_process"
     mineru_output_md_dir: str = "./data_to_index"
     mineru_enable_formula_parsing: bool = False
@@ -92,6 +92,15 @@ class Config(BaseSettings):
     mineru_lang: str = "east_slavic"
     mineru_sglang_url: str = ""
     mineru_subprocess_timeout: int = 600  # Таймаут для subprocess вызова mineru в секундах
+    
+    # Настройки Docling (заменяет все старые конвертеры)
+    docling_use_ocr: bool = True
+    docling_use_tables: bool = True
+    docling_use_formulas: bool = True
+    docling_model_backend: str = "huggingface"
+    docling_ocr_model: str = "easyocr"  # Для будущего расширения
+    docling_ocr_lang: str = "ru"  # "ru", "en", "kk" или "east_slavic"
+    docling_images_dir: str = "images"  # Поддиректория для изображений
     
     # Настройки кэширования
     config_cache_ttl: int = Field(default=60, ge=1)  # Минимум 1 секунда

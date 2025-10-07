@@ -411,86 +411,73 @@
             
         </div>
         
-        <!-- Conversion Module -->
-        <div id="conversion-module" class="module-content" x-show="activeTab === 'conversion'">
+        <!-- Conversion Module (Docling) -->
+        <div id="conversion-module" class="module" x-show="activeTab === 'conversion'">
             <div class="module-card">
-                <h3>Настройки обработки PDF (MinerU - Subprocess)</h3>
-                <p><strong>Важно:</strong> Убедитесь, что пакет `mineru` установлен и команда `mineru` доступна в вашем окружении.</p>
+                <h3>Настройки обработки документов (Docling с EasyOCR)</h3>
                 
-                <form action="/api/admin/update-settings" method="post" class="settings-form" data-module="conversion" @submit="submitSettingsForm">
-                    <input type="hidden" name="action" value="save_mineru_settings">
+                <form id="conversion-form" data-module="conversion" @submit="submitSettingsForm">
+                    <input type="hidden" name="action" value="save_docling_settings">
                     <input type="hidden" name="active_tab" value="conversion">
                     
-                    <label for="mineru_input_pdf_dir">Папка с PDF файлами для обработки</label>
-                    <input type="text" id="mineru_input_pdf_dir" name="mineru_input_pdf_dir" value="{{ config.mineru_input_pdf_dir }}" required>
-                    
-                    <label for="mineru_output_md_dir">Папка для сохранения Markdown файлов (вход для индексации)</label>
-                    <input type="text" id="mineru_output_md_dir" name="mineru_output_md_dir" value="{{ config.mineru_output_md_dir }}" required>
-                    
-                    <div class="grid-3col">
-                        <div>
-                            <input type="checkbox" id="mineru_enable_formula_parsing" name="mineru_enable_formula_parsing" value="True" {% if config.mineru_enable_formula_parsing %}checked{% endif %}>
-                            <label for="mineru_enable_formula_parsing">Парсинг формул</label>
-                        </div>
-                        <div>
-                            <input type="checkbox" id="mineru_enable_table_parsing" name="mineru_enable_table_parsing" value="True" {% if config.mineru_enable_table_parsing %}checked{% endif %}>
-                            <label for="mineru_enable_table_parsing">Парсинг таблиц</label>
-                        </div>
-                        <div>
-                            <!-- Можно добавить другие опции, если понадобятся -->
-                        </div>
-                    </div>
-                    
                     <div class="grid-2col">
                         <div>
-                            <label for="mineru_backend">Бэкенд обработки</label>
-                            <select id="mineru_backend" name="mineru_backend" required>
-                                <option value="pipeline" {% if config.mineru_backend == 'pipeline' %}selected{% endif %}>Pipeline</option>
-                                <option value="vlm-transformers" {% if config.mineru_backend == 'vlm-transformers' %}selected{% endif %}>VLM Transformers</option>
-                                <option value="vlm-sglang-client" {% if config.mineru_backend == 'vlm-sglang-client' %}selected{% endif %}>VLM SGLang Client</option>
-                            </select>
+                            <input type="checkbox" id="docling_use_ocr" name="docling_use_ocr" value="True" {% if config.docling_use_ocr %}checked{% endif %}>
+                            <label for="docling_use_ocr">Включить OCR</label>
                         </div>
                         <div>
-                            <label for="mineru_method">Метод парсинга</label>
-                            <select id="mineru_method" name="mineru_method" required>
-                                <option value="auto" {% if config.mineru_method == 'auto' %}selected{% endif %}>Auto</option>
-                                <option value="txt" {% if config.mineru_method == 'txt' %}selected{% endif %}>TXT</option>
-                                <option value="ocr" {% if config.mineru_method == 'ocr' %}selected{% endif %}>OCR</option>
-                            </select>
+                            <input type="checkbox" id="docling_use_tables" name="docling_use_tables" value="True" {% if config.docling_use_tables %}checked{% endif %}>
+                            <label for="docling_use_tables">Включить парсинг таблиц</label>
+                        </div>
+                        <div>
+                            <input type="checkbox" id="docling_use_formulas" name="docling_use_formulas" value="True" {% if config.docling_use_formulas %}checked{% endif %}>
+                            <label for="docling_use_formulas">Включить распознавание формул</label>
                         </div>
                     </div>
                     
-                    <div class="grid-2col">
-                        <div>
-                            <label for="mineru_lang">Язык для OCR</label>
-                            <input type="text" id="mineru_lang" name="mineru_lang" value="{{ config.mineru_lang }}" required>
-                        </div>
-                        <div>
-                            <label for="mineru_sglang_url">URL сервера SGLang (если backend=VLM SGLang Client)</label>
-                            <input type="text" id="mineru_sglang_url" name="mineru_sglang_url" value="{{ config.mineru_sglang_url }}">
-                        </div>
+                    <div class="form-group">
+                        <label for="docling_ocr_lang">Язык OCR</label>
+                        <select id="docling_ocr_lang" name="docling_ocr_lang">
+                            <option value="ru" {% if config.docling_ocr_lang == 'ru' %}selected{% endif %}>Русский</option>
+                            <option value="en" {% if config.docling_ocr_lang == 'en' %}selected{% endif %}>Английский</option>
+                            <option value="kk" {% if config.docling_ocr_lang == 'kk' %}selected{% endif %}>Казахский</option>
+                            <option value="east_slavic" {% if config.docling_ocr_lang == 'east_slavic' %}selected{% endif %}>Восточнославянские языки</option>
+                        </select>
                     </div>
-
-                    <fieldset>
-                        <legend>Источник моделей для MinerU</legend>
-                        <input type="radio" id="ms_hf" name="mineru_model_source" value="huggingface" {% if config.mineru_model_source == 'huggingface' %}checked{% endif %}>
-                        <label for="ms_hf">Hugging Face</label>
-                        <input type="radio" id="ms_ms" name="mineru_model_source" value="modelscope" {% if config.mineru_model_source == 'modelscope' %}checked{% endif %}>
-                        <label for="ms_ms">ModelScope</label>
-                        <input type="radio" id="ms_local" name="mineru_model_source" value="local" {% if config.mineru_model_source == 'local' %}checked{% endif %}>
-                        <label for="ms_local">Локальные модели</label>
-                    </fieldset>
                     
-                    <label for="mineru_models_dir">Путь к локальным моделям (если выбрано 'Локальные модели')</label>
-                    <input type="text" id="mineru_models_dir" name="mineru_models_dir" value="{{ config.mineru_models_dir }}">
-
-                    <button type="submit" :disabled="isProcessing">Сохранить настройки MinerU</button>
+                    <div class="form-group">
+                        <label for="docling_model_backend">Бэкенд для моделей</label>
+                        <select id="docling_model_backend" name="docling_model_backend">
+                            <option value="huggingface" {% if config.docling_model_backend == 'huggingface' %}selected{% endif %}>Hugging Face</option>
+                            <option value="local" {% if config.docling_model_backend == 'local' %}selected{% endif %}>Локальные модели</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="docling_images_dir">Поддиректория для изображений</label>
+                        <input type="text" id="docling_images_dir" name="docling_images_dir" value="{{ config.docling_images_dir }}">
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary" :disabled="isProcessing">Сохранить настройки Docling</button>
                     <div class="progress" x-show="isProcessing">
-                        <span class="spinner"></span> Сохранение настроек MinerU...
+                        <span class="spinner"></span> Сохранение настроек Docling...
                     </div>
                 </form>
+                
+                <div class="supported-formats">
+                    <h4>Поддерживаемые форматы:</h4>
+                    <ul>
+                        <li>PDF (с OCR и таблицами)</li>
+                        <li>DOCX</li>
+                        <li>PPTX</li>
+                        <li>XLSX</li>
+                        <li>Изображения (PNG, JPG, TIFF) с OCR</li>
+                        <li>HTML</li>
+                        <li>Markdown</li>
+                    </ul>
+                    <p><strong>Примечание:</strong> Для OCR используется EasyOCR, который не требует установки системных зависимостей. EasyOCR поддерживает русский и казахский языки из коробки. При первом использовании EasyOCR скачает модели (~500MB).</p>
+                </div>
             </div>
-            
         </div>
         
 

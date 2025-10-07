@@ -374,6 +374,26 @@ def update_mineru_settings(form_data: dict, config: Config):
             config.mineru_sglang_url = mineru_sglang_url
 
 
+def update_docling_settings(form_data: dict, config: Config):
+    """Обновляет настройки Docling."""
+    # Checkboxes теперь bool
+    config.docling_use_ocr = form_data.get("docling_use_ocr", False)
+    config.docling_use_tables = form_data.get("docling_use_tables", False)
+    config.docling_use_formulas = form_data.get("docling_use_formulas", False)
+    
+    if form_data.get("docling_model_backend") is not None: 
+        config.docling_model_backend = form_data["docling_model_backend"]
+    
+    if form_data.get("docling_ocr_model") is not None: 
+        config.docling_ocr_model = form_data["docling_ocr_model"]
+    
+    if form_data.get("docling_ocr_lang") is not None: 
+        config.docling_ocr_lang = form_data["docling_ocr_lang"]
+    
+    if form_data.get("docling_images_dir") is not None: 
+        config.docling_images_dir = form_data["docling_images_dir"]
+
+
 def update_advanced_settings(form_data: dict, config: Config):
     """Обновляет дополнительные настройки."""
     # Обновляем модель для плотных векторов, если она передана
@@ -710,6 +730,10 @@ async def update_settings(
         # --- Обработка настроек MinerU ---
         elif action == "save_mineru_settings":
             update_mineru_settings(form_data, config)
+            
+        # --- Обработка настроек Docling ---
+        elif action == "save_docling_settings":
+            update_docling_settings(form_data, config)
             
         # --- Обработка дополнительных настроек ---
         elif action == "save_advanced_settings":

@@ -4,7 +4,7 @@ import logging
 from pathlib import Path
 
 # Qdrant client provided via dependency injection (core.dependencies.get_client)
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
@@ -198,7 +198,7 @@ async def get_indexing_page(
         })
 
 
-@app.post("/indexing/run-indexing", response_class=JSONResponse)
+@app.post("/run-indexing", response_class=JSONResponse)
 async def run_indexing(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -222,7 +222,7 @@ async def run_indexing(
         return JSONResponse(content={"status": "error", "message": "Ошибка запуска индексации"})
 
 
-@app.post("/indexing/process-files", response_class=JSONResponse)
+@app.post("/process-files", response_class=JSONResponse)
 async def process_files_endpoint(
     request: Request,
     background_tasks: BackgroundTasks,
@@ -252,6 +252,67 @@ async def process_files_endpoint(
     except Exception as e:
         logger.exception(f"[{request_id}] Error scheduling file processing task: {str(e)}")
         return JSONResponse(content={"status": "error", "message": "Ошибка запуска обработки файлов"})
+
+
+@app.post("/update-paths", response_class=JSONResponse)
+async def update_paths(
+    request: Request,
+    input_pdf_dir: str = Form(...),
+    output_md_dir: str = Form(...),
+    indexing_folder: str = Form(...),
+    username: str = Depends(verify_admin_access_from_form),
+    config: Config = Depends(get_config)
+):
+    """Обновляет пути для конвертации и индексации."""
+    request_id = get_request_id(request)
+    logger.info(f"[{request_id}] Update paths request by user: {username}")
+    
+    try:
+        # Проверяем существование директорий
+        if input_pdf_dir and not Path(input_pdf_dir).exists():
+            return JSONResponse(
+                content={"status": "error", "message": f"Входная директория не существует: {input_pdf_dir}"},
+                status_code=400
+            )
+        
+        if output_md_dir and not Path(output_md_dir).exists():
+            return JSONResponse(
+                content={"status": "error", "message": f"Выходная директория не существует: {output_md_dir}"},
+                status_code=400
+            )
+        
+        if indexing_folder and not Path(indexing_folder).exists():
+            return JSONResponse(
+                content={"status": "error", "message": f"Директория индексации не существует: {indexing_folder}"},
+                status_code=400
+            )
+        
+        # Обновляем настройки в конфигурации
+        config.mineru_input_pdf_dir = input_pdf_dir
+        config.mineru_output_md_dir = output_md_dir
+        config.folder_path = indexing_folder
+        
+        # Сохраняем конфигурацию
+        config_manager.save(config)
+        
+        logger.info(f"[{request_id}] Paths updated successfully:\n  Input PDF dir: {input_pdf_dir}\n  Output MD dir: {output_md_dir}\n  Indexing folder: {indexing_folder}")
+        
+        return JSONResponse(content={
+            "status": "success", 
+            "message": "Пути успешно обновлены",
+            "paths": {
+                "input_pdf_dir": input_pdf_dir,
+                "output_md_dir": output_md_dir,
+                "indexing_folder": indexing_folder
+            }
+        })
+        
+    except Exception as e:
+        logger.exception(f"[{request_id}] Error updating paths: {str(e)}")
+        return JSONResponse(
+            content={"status": "error", "message": f"Ошибка при обновлении путей: {str(e)}"},
+            status_code=500
+        )
 
 
 @app.post("/delete-collection", response_class=JSONResponse)
