@@ -8,6 +8,18 @@ from pathlib import Path
 import uvicorn
 from dotenv import load_dotenv
 
+# Устанавливаем переменные окружения для кэша моделей
+models_dir = Path("./models")
+os.makedirs(models_dir, exist_ok=True)
+os.makedirs(models_dir / "huggingface_cache", exist_ok=True)
+os.makedirs(models_dir / "easyocr", exist_ok=True)
+os.makedirs(models_dir / "fastembed", exist_ok=True)
+
+os.environ["TRANSFORMERS_CACHE"] = str(models_dir / "huggingface_cache")
+os.environ["HF_HOME"] = str(models_dir / "huggingface_cache")
+os.environ["FASTEMBED_CACHE_DIR"] = str(models_dir / "fastembed")
+os.environ["TOKENIZERS_PARALLELISM"] = "false"  # Стабильность
+
 # Импорт модулей для настройки приложения
 from app.app_factory import create_app
 from app.startup import startup_event_handler

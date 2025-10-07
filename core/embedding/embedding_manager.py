@@ -2,13 +2,17 @@
 
 import asyncio
 import logging
+import os
 import threading
 from collections import OrderedDict
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import torch
 from langchain_core.embeddings import Embeddings
 from langchain_huggingface import HuggingFaceEmbeddings
+from sentence_transformers import SentenceTransformer
+from huggingface_hub import snapshot_download
 
 from config.config_manager import ConfigManager
 from config.settings import Config
@@ -23,6 +27,60 @@ except ImportError:
     logger.warning("GGUF эмбеддер не доступен. Установите llama-cpp-python для работы с GGUF моделями.")
 
 logger = logging.getLogger(__name__)
+
+def get_embedding_model(model_name: str = None):
+    """Получение модели эмбеддингов с автоматическим скачиванием в папку models."""
+    config_manager = ConfigManager.get_instance()
+    config = config_manager.get()
+    
+    if model_name is None:
+        model_name = config.current_hf_model
+    
+    local_path = Path(config.local_models_path / "embeddings" / model_name)
+    
+    if local_path.exists():
+        logger.info(f"Используется локальная модель эмбеддингов: {local_path}")
+        return SentenceTransformer(
+            str(local_path), 
+            local_files_only=True,
+            trust_remote_code=False
+        )
+    else:
+        if config.auto_download_models:
+            logger.info(f"Модель {model_name} не найдена локально. Скачивание в папку models...")
+            
+            try:
+                # Создаем директорию, если она не существует
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Скачиваем модель напрямую в нашу папку
+                downloaded_path = snapshot_download(
+                    repo_id=model_name,
+                    cache_dir=str(config.huggingface_cache_path),  # Временный кэш
+                    local_dir=str(local_path),  # Куда сохранять модель
+                    local_dir_use_symlinks=False,  # Не использовать символические ссылки
+                    token=config.huggingface_token  # Для приватных моделей
+                )
+                
+                logger.info(f"Модель успешно скачана в: {downloaded_path}")
+                
+                # Возвращаем модель из нашей папки
+                return SentenceTransformer(
+                    str(local_path), 
+                    local_files_only=True,
+                    trust_remote_code=False
+                )
+            except Exception as e:
+                logger.error(f"Ошибка при скачивании модели {model_name}: {e}")
+        
+        # Fallback на кэш HuggingFace, если скачивание не удалось или отключено
+        logger.info(f"Использование кэша HuggingFace для модели {model_name}")
+        return SentenceTransformer(
+            model_name, 
+            cache_folder=str(config.huggingface_cache_path),
+            local_files_only=config.use_local_only,
+            trust_remote_code=False
+        )
 
 # Get singleton instance of ConfigManager
 config_manager = ConfigManager.get_instance()

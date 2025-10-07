@@ -3,12 +3,67 @@
 import logging
 import re
 from collections import Counter
+from pathlib import Path
 from typing import Dict, List, Tuple, Any
 
+from fastembed import SparseTextEmbedding
 from qdrant_client.models import SparseVector
 from config.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
+
+def get_sparse_model(model_name: str = None):
+    """Получение sparse модели с автоматическим скачиванием в папку models."""
+    config_manager = ConfigManager.get_instance()
+    config = config_manager.get()
+    
+    if model_name is None:
+        model_name = config.sparse_embedding
+    
+    local_path = Path(config.local_models_path / "fastembed" / model_name)
+    
+    if local_path.exists():
+        logger.info(f"Используется локальная sparse модель: {local_path}")
+        try:
+            return SparseTextEmbedding(
+                model_name=model_name,
+                cache_dir=str(local_path),
+                local_files_only=True
+            )
+        except Exception as e:
+            logger.warning(f"Ошибка использования локальной sparse модели: {e}. Fallback на стандартный кэш.")
+            return SparseTextEmbedding(
+                model_name=model_name,
+                cache_dir=str(config.fastembed_cache_path)
+            )
+    else:
+        logger.info(f"Sparse модель {model_name} не найдена локально. Скачивание...")
+        
+        try:
+            # Создаем директорию, если она не существует
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Скачиваем модель
+            model = SparseTextEmbedding(
+                model_name=model_name,
+                cache_dir=str(local_path)
+            )
+            
+            # Инициализация: encode один текст для preload
+            try:
+                _ = list(model.encode(["test text"]))[0]  # SparseEmbedding object
+                logger.info(f"Sparse модель успешно инициализирована в: {local_path}")
+            except Exception as init_e:
+                logger.warning(f"Инициализация sparse модели failed: {init_e}")
+            
+            return model
+        except Exception as e:
+            logger.error(f"Ошибка при скачивании sparse модели {model_name}: {e}")
+            # Возвращаем модель с стандартным кэшем
+            return SparseTextEmbedding(
+                model_name=model_name,
+                cache_dir=str(config.fastembed_cache_path)
+            )
 
 
 class SparseEmbeddingAdapter:

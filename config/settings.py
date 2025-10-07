@@ -164,6 +164,14 @@ class Config(BaseSettings):
     rag_threads: int = Field(default=4, ge=1)  # Количество потоков для генерации
     rag_batch_size: int = Field(default=512, ge=1)  # Размер батча для обработки
     rag_beam_size: int = Field(default=1, ge=1)  # Размер beam для генерации
+    
+    # Настройки локальных моделей
+    local_models_path: Path = Path("./models")
+    huggingface_cache_path: Path = Path("./models/huggingface_cache")
+    easyocr_models_path: Path = Path("./models/easyocr")
+    fastembed_cache_path: Path = Path("./models/fastembed")
+    use_local_only: bool = True  # Флаг для строгого оффлайна
+    auto_download_models: bool = True  # Флаг автоматического скачивания моделей
 
     def save_to_file(self, file_path: Optional[str] = None) -> None:
         """Сохранить конфигурацию в JSON файл.
@@ -172,10 +180,25 @@ class Config(BaseSettings):
             file_path: Путь к файлу для сохранения (по умолчанию используется config_file_path)
         """
         import json
+        from pathlib import Path
         if file_path is None:
             file_path = self.config_file_path
             
         config_dict = self.model_dump()
+        
+        # Преобразуем объекты Path в строки для сериализации в JSON
+        def convert_path_to_str(obj):
+            if isinstance(obj, Path):
+                return str(obj)
+            elif isinstance(obj, dict):
+                return {key: convert_path_to_str(value) for key, value in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_path_to_str(item) for item in obj]
+            else:
+                return obj
+        
+        config_dict = convert_path_to_str(config_dict)
+        
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(config_dict, f, indent=4, ensure_ascii=False)
 

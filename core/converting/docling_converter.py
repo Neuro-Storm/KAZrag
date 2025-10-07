@@ -29,18 +29,18 @@ class DoclingConverter:
     
     def _initialize_converter(self):
         """Инициализация конвертера Docling с настройками из конфигурации."""
-        # В новой версии Docling структура PdfPipelineOptions может быть несовместима
-        # Попробуем сначала использовать настроенный конвертер, а затем базовый
         config = self.config_manager.get()
         
         try:
-            # Попробуем создать PdfPipelineOptions с разным набором параметров в зависимости от поддержки
+            # Создаем опции для OCR с указанием на локальные модели
             ocr_options = EasyOcrOptions(
-                lang=[config.docling_ocr_lang]
+                lang=[config.docling_ocr_lang],
+                model_storage_directory=str(config.easyocr_models_path),
+                download_enabled=config.auto_download_models
             )
             
+            # Создаем PdfPipelineOptions с учетом совместимости версий
             try:
-                # Пробуем создать с полным набором параметров
                 if config.docling_use_tables:
                     pipeline_options = PdfPipelineOptions(
                         do_ocr=config.docling_use_ocr,
@@ -57,16 +57,11 @@ class DoclingConverter:
                         ocr_options=ocr_options
                     )
             except TypeError:
-                # Если это не сработало, пробуем с минимальным набором параметров
+                # Fallback для старых версий Docling
                 pipeline_options = PdfPipelineOptions(
                     do_ocr=config.docling_use_ocr,
                     ocr_options=ocr_options
                 )
-            
-            # Добавление опций для распознавания формул, если включено
-            # Note: Formula recognition options may not be available in all versions of Docling
-            if config.docling_use_formulas:
-                logger.warning("Распознавание формул запрошено, но настройки формулы могут отличаться в текущей версии Docling")
             
             # Инициализация конвертера с настроенными опциями
             self.converter = DocumentConverter(
@@ -74,12 +69,20 @@ class DoclingConverter:
                     InputFormat.PDF: pipeline_options,
                 },
             )
+            
+            # Preload-тест для оффлайна
+            try:
+                # Тестовый вызов без текста, чтобы проверить модели
+                from easyocr import Reader
+                test_reader = Reader([config.docling_ocr_lang], model_storage_directory=str(config.easyocr_models_path), download_enabled=False)
+                logger.info("EasyOCR preload успешен: модели найдены локально")
+            except Exception as preload_e:
+                logger.warning(f"EasyOCR preload failed (но fallback на Docling): {preload_e}")
+            
+            logger.info("Docling конвертер инициализирован с локальными моделями EasyOCR")
         except Exception as e:
-            logger.warning(f"Ошибка инициализации конвертера с настройками: {e}. Используем конвертер по умолчанию.")
-            # Если с настройками не получается, используем базовый конвертер
+            logger.warning(f"Ошибка с локальными опциями: {e}. Fallback на дефолт.")
             self.converter = DocumentConverter()
-        
-        logger.info("Docling конвертер инициализирован с EasyOCR")
     
     def convert_file(self, file_path: Path, output_dir: Path) -> List[Path]:
         """Конвертировать файл в Markdown.

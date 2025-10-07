@@ -1,15 +1,72 @@
 """Модуль для определения стратегии поиска."""
 
 import logging
+from pathlib import Path
 from typing import Tuple, List, Optional, Dict, Any
 
 from qdrant_client.http.models import RecommendRequest, SearchRequest, ScoredPoint
 from qdrant_client.models import SparseVectorParams, Modifier, SparseIndexParams
 
+from sentence_transformers import CrossEncoder
+from huggingface_hub import snapshot_download
 from core.search.collection_analyzer import CollectionAnalyzer
 from config.config_manager import ConfigManager
 
 logger = logging.getLogger(__name__)
+
+def get_reranker_model(model_name: str = None):
+    """Получение модели ранжирования с автоматическим скачиванием в папку models."""
+    config_manager = ConfigManager.get_instance()
+    config = config_manager.get()
+    
+    if model_name is None:
+        model_name = config.reranker_model
+    
+    local_path = Path(config.local_models_path / "rerankers" / model_name)
+    
+    if local_path.exists():
+        logger.info(f"Используется локальная модель ранжирования: {local_path}")
+        return CrossEncoder(
+            str(local_path), 
+            device=config.device,
+            local_files_only=True
+        )
+    else:
+        if config.auto_download_models:
+            logger.info(f"Модель ранжирования {model_name} не найдена локально. Скачивание...")
+            
+            try:
+                # Создаем директорию, если она не существует
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Скачиваем модель напрямую в нашу папку
+                downloaded_path = snapshot_download(
+                    repo_id=model_name,
+                    cache_dir=str(config.huggingface_cache_path),  # Временный кэш
+                    local_dir=str(local_path),  # Куда сохранять модель
+                    local_dir_use_symlinks=False,  # Не использовать символические ссылки
+                    token=config.huggingface_token  # Для приватных моделей
+                )
+                
+                logger.info(f"Модель ранжирования успешно скачана в: {downloaded_path}")
+                
+                # Возвращаем модель из нашей папки
+                return CrossEncoder(
+                    str(local_path), 
+                    device=config.device,
+                    local_files_only=True
+                )
+            except Exception as e:
+                logger.error(f"Ошибка при скачивании модели ранжирования {model_name}: {e}")
+        
+        # Fallback на кэш HuggingFace
+        logger.info(f"Использование кэша HuggingFace для модели ранжирования {model_name}")
+        return CrossEncoder(
+            model_name, 
+            cache_dir=str(config.huggingface_cache_path),
+            device=config.device,
+            local_files_only=config.use_local_only
+        )
 
 
 class SearchStrategy:

@@ -770,3 +770,45 @@ async def update_settings(
             return RedirectResponse(url=f"/settings?status=save_error&tab={active_tab}", status_code=303)
 
 
+# Добавляем эндпоинты для управления моделями
+from utils.model_manager import ModelManager
+from config.config_manager import ConfigManager
+
+@app.get("/models")
+async def list_models():
+    """Получение списка всех моделей."""
+    return {
+        "embeddings": ModelManager.list_models("embeddings"),
+        "rerankers": ModelManager.list_models("rerankers"),
+        "gguf": ModelManager.list_models("gguf"),
+        "easyocr": ModelManager.list_models("easyocr"),
+        "fastembed": ModelManager.list_models("fastembed")
+    }
+
+@app.post("/models/download")
+async def download_model(model_name: str, model_type: str, token: str = None):
+    """Скачивание модели."""
+    try:
+        config_manager = ConfigManager.get_instance()
+        config = config_manager.get()
+        
+        if token is None:
+            token = config.huggingface_token
+            
+        path = ModelManager.download_model(model_name, model_type, token)
+        return {"success": True, "path": str(path)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+@app.delete("/models/{model_type}/{model_name}")
+async def remove_model(model_type: str, model_name: str):
+    """Удаление модели."""
+    success = ModelManager.remove_model(model_name, model_type)
+    return {"success": success}
+
+@app.get("/models/{model_type}/{model_name}/size")
+async def get_model_size(model_type: str, model_name: str):
+    """Получение размера модели."""
+    size = ModelManager.get_model_size(model_name, model_type)
+    return {"size_mb": size}
+

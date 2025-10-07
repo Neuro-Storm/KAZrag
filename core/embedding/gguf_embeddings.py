@@ -9,7 +9,35 @@ from langchain_core.embeddings import Embeddings
 from config.config_manager import ConfigManager
 from config.settings import Config
 
+from pathlib import Path
+
 logger = logging.getLogger(__name__)
+
+def get_gguf_model(model_name: str = None):
+    """Получение GGUF модели с автоматическим скачиванием в папку models."""
+    config_manager = ConfigManager.get_instance()
+    config = config_manager.get()
+    
+    if model_name is None:
+        model_name = config.rag_model_path
+    
+    local_path = Path(config.local_models_path / "gguf" / model_name)
+    
+    if local_path.exists():
+        logger.info(f"Используется локальная GGUF модель: {local_path}")
+        from llama_cpp import Llama
+        return Llama(
+            model_path=str(local_path),
+            n_ctx=config.rag_context_size,
+            n_gpu_layers=config.rag_gpu_layers,
+            n_threads=config.rag_threads,
+            verbose=False
+        )
+    else:
+        logger.error(f"Локальная GGUF модель не найдена: {local_path}")
+        # Для GGUF моделей нет автоматического скачивания, так как они обычно большие
+        # и требуют ручного скачивания
+        raise FileNotFoundError(f"GGUF model not found at {local_path}. Please download it manually.")
 
 # Импортируем llama_cpp для правильной работы тестов
 try:
