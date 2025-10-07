@@ -97,6 +97,9 @@ data_to_index/
 data_to_index1/
 evaluation_results/
 
+# Директория с моделями
+models/
+
 # Source code collection script and its output
 collect_source_code.py
 project_source_code.txt
