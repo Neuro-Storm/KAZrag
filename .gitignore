@@ -100,3 +100,4 @@ evaluation_results/
 # Source code collection script and its output
 collect_source_code.py
 project_source_code.txt
+scripts/project_source_code_additional.txt
