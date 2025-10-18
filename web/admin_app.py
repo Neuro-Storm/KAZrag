@@ -392,6 +392,11 @@ def update_docling_settings(form_data: dict, config: Config):
     
     if form_data.get("docling_images_dir") is not None: 
         config.docling_images_dir = form_data["docling_images_dir"]
+    
+    # Обработка новых параметров для управления ресурсами
+    config.docling_enable_page_images = form_data.get("docling_enable_page_images", False)
+    config.docling_table_detection_advanced = form_data.get("docling_table_detection_advanced", False)
+    config.docling_formula_detection_advanced = form_data.get("docling_formula_detection_advanced", False)
 
 
 def update_advanced_settings(form_data: dict, config: Config):

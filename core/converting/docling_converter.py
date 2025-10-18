@@ -9,8 +9,10 @@ from docling.document_converter import DocumentConverter
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import (
     PdfPipelineOptions,
-    TableStructureOptions
+    TableStructureOptions,
+    EasyOcrOptions
 )
+from docling.document_converter import PdfFormatOption
 # Импорт для TableFormerMode (если используется; fallback на default)
 try:
     from docling.datamodel.table_structure import TableFormerMode
@@ -35,16 +37,7 @@ class DoclingConverter:
         # Создаем базовый конвертер без настроек
         self.converter = DocumentConverter()
         
-        # Preload-тест для оффлайна (EasyOCR модели)
-        try:
-            config = self.config_manager.get()
-            from easyocr import Reader
-            test_reader = Reader([config.docling_ocr_lang], model_storage_directory=str(config.easyocr_models_path), download_enabled=False)
-            logger.info("EasyOCR preload успешен: модели найдены локально")
-        except Exception as preload_e:
-            logger.warning(f"EasyOCR preload failed (но fallback на Docling): {preload_e}")
-        
-        logger.info("Docling конвертер инициализирован с локальными моделями EasyOCR")
+        logger.info("Docling конвертер инициализирован")
     
     def convert_file(self, file_path: Path, output_dir: Path) -> List[Path]:
         """Конвертировать файл в Markdown.
@@ -68,24 +61,53 @@ class DoclingConverter:
             # Опции для таблиц (если включено)
             table_options = None
             if hasattr(config, 'docling_use_tables') and config.docling_use_tables:
+                # Устанавливаем режим таблицы, используя правильное значение
+                table_mode = 'accurate'  # Значение по умолчанию
+                if hasattr(config, 'docling_table_mode'):
+                    if config.docling_table_mode.lower() in ['fast', 'accurate']:
+                        table_mode = config.docling_table_mode.lower()
+                
                 table_options = TableStructureOptions(
                     do_cell_matching=True,  # Default: True (улучшает mapping к PDF cells)
-                    mode=TableFormerMode.ACCURATE if TableFormerMode else None  # Default: ACCURATE
+                    mode=table_mode  # Правильное строковое значение
                 )
+
+            # Опции для OCR с языком из конфигурации
+            ocr_options = None
+            if config.docling_use_ocr:
+                # Используем язык из конфигурации
+                ocr_lang = getattr(config, 'docling_ocr_lang', 'en')  # по умолчанию английский
+                # Для EasyOCR язык указывается как список
+                if isinstance(ocr_lang, str):
+                    ocr_lang_list = [ocr_lang]
+                else:
+                    ocr_lang_list = ocr_lang
+                ocr_options = EasyOcrOptions(lang=ocr_lang_list)
+
+            # Определяем, включать ли расширенное обнаружение таблиц
+            enable_table_detection = (
+                getattr(config, 'docling_use_tables', False) and 
+                getattr(config, 'docling_table_detection_advanced', True)
+            )
             
             # PDF опции (OCR по умолчанию, если EasyOCR доступен)
             pdf_pipeline = PdfPipelineOptions(
                 artifacts_path=artifacts_path,
                 enable_remote_services=False,  # Локальный режим (без внешних сервисов)
-                do_table_structure=getattr(config, 'docling_use_tables', False),
-                table_structure_options=table_options
+                do_table_structure=enable_table_detection,  # Управление расширенным обнаружением таблиц
+                table_structure_options=table_options,
+                do_ocr=config.docling_use_ocr,  # Включаем OCR если нужно
+                ocr_options=ocr_options,  # Используем наши настройки OCR
+                generate_page_images=getattr(config, 'docling_enable_page_images', True)  # Управление генерацией изображений страниц
             )
-            
+
             # format_options для PDF (остальные — default)
             format_options = {
-                InputFormat.PDF: pdf_pipeline,
+                InputFormat.PDF: PdfFormatOption(  # Используем PdfFormatOption вместо прямого PdfPipelineOptions
+                    pipeline_options=pdf_pipeline
+                ),
             }
-            
+
             # Создание нового конвертера с опциями
             temp_converter = DocumentConverter(
                 format_options=format_options,

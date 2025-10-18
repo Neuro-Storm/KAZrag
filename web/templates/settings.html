@@ -458,6 +458,21 @@
                         <input type="text" id="docling_images_dir" name="docling_images_dir" value="{{ config.docling_images_dir }}">
                     </div>
                     
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="docling_enable_page_images" name="docling_enable_page_images" value="True" {% if config.docling_enable_page_images %}checked{% endif %}>
+                        <label for="docling_enable_page_images">Генерировать изображения страниц (ресурсоемко)</label>
+                    </div>
+                    
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="docling_table_detection_advanced" name="docling_table_detection_advanced" value="True" {% if config.docling_table_detection_advanced %}checked{% endif %}>
+                        <label for="docling_table_detection_advanced">Расширенное обнаружение таблиц (ресурсоемко)</label>
+                    </div>
+                    
+                    <div class="form-group checkbox-group">
+                        <input type="checkbox" id="docling_formula_detection_advanced" name="docling_formula_detection_advanced" value="True" {% if config.docling_formula_detection_advanced %}checked{% endif %}>
+                        <label for="docling_formula_detection_advanced">Расширенное обнаружение формул (ресурсоемко)</label>
+                    </div>
+                    
                     <button type="submit" class="btn btn-primary" :disabled="isProcessing">Сохранить настройки Docling</button>
                     <div class="progress" x-show="isProcessing">
                         <span class="spinner"></span> Сохранение настроек Docling...

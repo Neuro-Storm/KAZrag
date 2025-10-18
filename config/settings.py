@@ -101,6 +101,10 @@ class Config(BaseSettings):
     docling_ocr_model: str = "easyocr"  # Для будущего расширения
     docling_ocr_lang: str = "ru"  # "ru", "en", "kk" или "east_slavic"
     docling_images_dir: str = "images"  # Поддиректория для изображений
+    docling_table_mode: str = "accurate"  # "fast" или "accurate" - режим обработки таблиц
+    docling_enable_page_images: bool = True  # Генерировать ли изображения страниц (ресурсоемко)
+    docling_table_detection_advanced: bool = True  # Расширенное обнаружение таблиц (ресурсоемко)
+    docling_formula_detection_advanced: bool = True  # Расширенное обнаружение формул (ресурсоемко)
     
     # Настройки кэширования
     config_cache_ttl: int = Field(default=60, ge=1)  # Минимум 1 секунда

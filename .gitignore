@@ -107,3 +107,6 @@ scripts/project_source_code_additional.txt
 
 # Log clearing script
 scripts/clear_log.py
+
+# Memory optimization script
+scripts/fix_memory_issues.py
