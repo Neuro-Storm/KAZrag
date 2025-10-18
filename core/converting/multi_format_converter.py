@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Callable
 
 from core.converting.docling_converter import DoclingConverter
+from core.converting.file_tracker import FileTracker
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +16,8 @@ class MultiFormatConverter:
     def __init__(self):
         """Инициализация конвертера."""
         self.docling_converter = DoclingConverter()
-        logger.info("MultiFormatConverter инициализирован с Docling")
+        self.tracker = FileTracker()
+        logger.info("MultiFormatConverter инициализирован с Docling и FileTracker")
     
     def convert_files(
         self, 
@@ -43,8 +45,43 @@ class MultiFormatConverter:
         # Создание выходной директории
         output_path.mkdir(parents=True, exist_ok=True)
         
-        # Конвертация файлов
-        return self.docling_converter.convert_directory(input_path, output_path, progress_callback)
+        # Сбросить флаг остановки перед началом
+        self.tracker.reset_stop_flag()
+        
+        # Получаем список необработанных файлов
+        unprocessed_files = self.tracker.get_unprocessed_files(input_path)
+        total_files = len(unprocessed_files)
+        
+        results = {}
+        processed_count = 0
+        
+        for file_path in unprocessed_files:
+            # Проверить, не остановлена ли конвертация
+            if self.tracker.is_conversion_stopped():
+                logger.info("Конвертация остановлена пользователем")
+                break
+                
+            processed_count += 1
+            if progress_callback:
+                progress_callback(processed_count, total_files)
+                
+            # Обновляем статус файла на "в процессе"
+            self.tracker.update_file(file_path, "in_progress")
+            
+            try:
+                file_results = self.docling_converter.convert_file(file_path, output_path)
+                if file_results:
+                    self.tracker.update_file(file_path, "converted")
+                    results[str(file_path)] = file_results
+                else:
+                    self.tracker.update_file(file_path, "error")
+                    results[str(file_path)] = []
+            except Exception as e:
+                logger.error(f"Ошибка при конвертации {file_path}: {e}")
+                self.tracker.update_file(file_path, "error")
+                results[str(file_path)] = []
+        
+        return results
     
     def is_supported(self, file_path: str) -> bool:
         """Проверить, поддерживается ли формат файла.
@@ -69,6 +106,10 @@ class MultiFormatConverter:
         """Перезагрузить конфигурацию конвертера."""
         self.docling_converter.reload_config()
         logger.info("Конфигурация MultiFormatConverter перезагружена")
+    
+    def stop_conversion(self):
+        """Остановить процесс конвертации."""
+        self.tracker.stop_conversion()
 
 
 def convert_files_to_md(input_dir: str, output_dir: str) -> tuple[bool, str]:

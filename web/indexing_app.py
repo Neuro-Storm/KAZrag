@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from config.config_manager import ConfigManager
 from config.settings import Config
 from core.converting.multi_format_converter import convert_files_to_md
+from core.converting.file_tracker import FileTracker
 from core.indexing.indexer import run_indexing_logic_sync
 from core.qdrant.qdrant_collections import (
     get_cached_collections,
@@ -313,6 +314,43 @@ async def update_paths(
             content={"status": "error", "message": f"Ошибка при обновлении путей: {str(e)}"},
             status_code=500
         )
+
+
+@app.get("/progress")
+async def get_conversion_progress():
+    """Возвращает статус прогресса конвертации."""
+    tracker = FileTracker()
+    tracking_data = tracker.get_all_files_status()
+    
+    total = len(tracking_data)
+    converted = len([f for f, d in tracking_data.items() if d["status"] == "converted"])
+    errors = len([f for f, d in tracking_data.items() if d["status"] == "error"])
+    in_progress = len([f for f, d in tracking_data.items() if d["status"] == "in_progress"])
+    pending = total - converted - errors - in_progress
+    
+    return {
+        "total": total,
+        "converted": converted,
+        "errors": errors,
+        "in_progress": in_progress,
+        "pending": pending,
+        "files": tracking_data
+    }
+
+
+@app.post("/stop-conversion")
+async def stop_conversion():
+    """Останавливает процесс конвертации."""
+    try:
+        from core.converting.multi_format_converter import MultiFormatConverter
+        converter = MultiFormatConverter()
+        converter.stop_conversion()
+        
+        logger.info("Конвертация остановлена по запросу пользователя")
+        return {"status": "stopped", "message": "Конвертация остановлена"}
+    except Exception as e:
+        logger.error(f"Ошибка остановки конвертации: {e}")
+        return {"status": "error", "message": f"Ошибка остановки: {str(e)}"}
 
 
 @app.post("/delete-collection", response_class=JSONResponse)

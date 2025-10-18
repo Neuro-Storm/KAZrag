@@ -103,7 +103,32 @@
                 <p><strong>Входная директория:</strong> {{ config.mineru_input_pdf_dir }}</p>
                 <p><strong>Выходная директория:</strong> {{ config.mineru_output_md_dir }}</p>
                 <button id="process-files-btn" onclick="processFiles()">Запустить конвертацию</button>
+                <button id="stop-conversion-btn" onclick="stopConversion()" style="margin-left: 10px; background-color: #dc3545; color: white;">Остановить конвертацию</button>
+                <button id="refresh-progress-btn" onclick="getConversionProgress()" style="margin-left: 10px;">Обновить прогресс</button>
                 <div id="conversion-status" style="margin-top: 1rem;"></div>
+                
+                <div id="conversion-progress" style="margin-top: 1rem; padding: 1rem; border: 1px solid #ddd; background-color: #f9f9f9;">
+                    <h4>Прогресс конвертации</h4>
+                    <div id="progress-summary">
+                        <p>Загружается прогресс...</p>
+                    </div>
+                    <div style="margin: 0.5rem 0; display: flex; gap: 10px; align-items: center;">
+                        <label for="file-status-filter">Фильтр: </label>
+                        <select id="file-status-filter" onchange="filterAndDisplayFiles()" style="padding: 0.25rem;">
+                            <option value="">Все файлы</option>
+                            <option value="converted">Обработано</option>
+                            <option value="error">Ошибки</option>
+                            <option value="in_progress">В процессе</option>
+                            <option value="pending">Ожидает</option>
+                        </select>
+                        <label for="files-display-limit">Показывать: </label>
+                        <input type="number" id="files-display-limit" value="50" min="1" max="500" style="width: 70px; padding: 0.25rem;" onchange="filterAndDisplayFiles()" title="Количество файлов для отображения">
+                        <span>файлов</span>
+                    </div>
+                    <div id="file-list" style="margin-top: 1rem; max-height: 300px; overflow-y: auto;">
+                        <!-- Список файлов будет загружен здесь -->
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -186,6 +211,208 @@
                 button.textContent = 'Запустить конвертацию';
             }
         }
+        
+        async function stopConversion() {
+            const button = document.getElementById('stop-conversion-btn');
+            const statusDiv = document.getElementById('conversion-status');
+            
+            if (!confirm('Вы уверены, что хотите остановить процесс конвертации?')) {
+                return;
+            }
+            
+            button.disabled = true;
+            button.textContent = 'Остановка...';
+            statusDiv.textContent = 'Отправка запроса на остановку конвертации...';
+            
+            try {
+                const response = await fetch('/api/indexing/stop-conversion', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'stopped') {
+                    statusDiv.innerHTML = '<span style="color: green;">✓</span> ' + data.message;
+                } else {
+                    statusDiv.innerHTML = '<span style="color: red;">✗ Ошибка:</span> ' + data.message;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = '<span style="color: red;">✗ Ошибка подключения:</span> ' + error.message;
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Остановить конвертацию';
+            }
+        }
+        
+        async function getConversionProgress() {
+            const progressDiv = document.getElementById('progress-summary');
+            const fileListDiv = document.getElementById('file-list');
+            const button = document.getElementById('refresh-progress-btn');
+            const statusFilter = document.getElementById('file-status-filter').value;
+            const displayLimit = parseInt(document.getElementById('files-display-limit').value) || 50;
+            
+            button.disabled = true;
+            button.textContent = 'Загрузка...';
+            
+            try {
+                const response = await fetch('/api/indexing/progress', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const data = await response.json();
+                
+                // Обновляем сводку прогресса
+                progressDiv.innerHTML = `
+                    <p><strong>Всего файлов:</strong> ${data.total}</p>
+                    <p><strong>Обработано:</strong> ${data.converted} | <strong>Ошибки:</strong> ${data.errors} | <strong>В процессе:</strong> ${data.in_progress} | <strong>Ожидает:</strong> ${data.pending}</p>
+                    <div style="height: 20px; background-color: #eee; border-radius: 10px; overflow: hidden;">
+                        <div style="height: 100%; width: ${data.total > 0 ? (data.converted / data.total * 100) : 0}%; background-color: #28a745; float: left;"></div>
+                        <div style="height: 100%; width: ${data.total > 0 ? (data.errors / data.total * 100) : 0}%; background-color: #dc3545; float: left;"></div>
+                        <div style="height: 100%; width: ${data.total > 0 ? (data.in_progress / data.total * 100) : 0}%; background-color: #ffc107; float: left;"></div>
+                    </div>
+                `;
+                
+                // Обновляем список файлов
+                if (Object.keys(data.files).length > 0) {
+                    fileListDiv.innerHTML = '<h5>Файлы:</h5><ul style="list-style-type: none; padding: 0;">';
+                    for (const [filePath, fileInfo] of Object.entries(data.files)) {
+                        let statusClass = '';
+                        let statusIcon = '';
+                        if (fileInfo.status === 'converted') {
+                            statusClass = 'style="color: green;"';
+                            statusIcon = '✓ ';
+                        } else if (fileInfo.status === 'error') {
+                            statusClass = 'style="color: red;"';
+                            statusIcon = '✗ ';
+                        } else if (fileInfo.status === 'in_progress') {
+                            statusClass = 'style="color: orange;"';
+                            statusIcon = '⏳ ';
+                        } else {
+                            statusClass = 'style="color: gray;"';
+                            statusIcon = '○ ';
+                        }
+                        
+                        fileListDiv.innerHTML += `<li ${statusClass}>${statusIcon}${filePath.split('\\').pop().split('/').pop()} (${fileInfo.status})</li>`;
+                    }
+                    fileListDiv.innerHTML += '</ul>';
+                } else {
+                    fileListDiv.innerHTML = '<p>Нет отслеживаемых файлов</p>';
+                }
+            } catch (error) {
+                progressDiv.innerHTML = '<span style="color: red;">Ошибка загрузки прогресса: ' + error.message + '</span>';
+                fileListDiv.innerHTML = '';
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Обновить прогресс';
+            }
+        }
+        
+        // Function to filter and display files based on current filter settings
+        function filterAndDisplayFiles() {
+            const fileListDiv = document.getElementById('file-list');
+            const statusFilter = document.getElementById('file-status-filter').value;
+            const displayLimit = parseInt(document.getElementById('files-display-limit').value) || 50;
+            
+            // We need to make sure we have the conversionData variable defined
+            if (window.conversionData && Object.keys(window.conversionData.files).length > 0) {
+                fileListDiv.innerHTML = '<h5>Файлы:</h5><ul style="list-style-type: none; padding: 0;">';
+                
+                let filteredFiles = Object.entries(window.conversionData.files);
+                
+                // Apply status filter if specified
+                if (statusFilter) {
+                    filteredFiles = filteredFiles.filter(([filePath, fileInfo]) => fileInfo.status === statusFilter);
+                }
+                
+                // Apply display limit
+                if (displayLimit > 0) {
+                    filteredFiles = filteredFiles.slice(0, displayLimit);
+                }
+                
+                for (const [filePath, fileInfo] of filteredFiles) {
+                    let statusClass = '';
+                    let statusIcon = '';
+                    if (fileInfo.status === 'converted') {
+                        statusClass = 'style="color: green;"';
+                        statusIcon = '✓ ';
+                    } else if (fileInfo.status === 'error') {
+                        statusClass = 'style="color: red;"';
+                        statusIcon = '✗ ';
+                    } else if (fileInfo.status === 'in_progress') {
+                        statusClass = 'style="color: orange;"';
+                        statusIcon = '⏳ ';
+                    } else {
+                        statusClass = 'style="color: gray;"';
+                        statusIcon = '○ ';
+                    }
+                    
+                    fileListDiv.innerHTML += `<li ${statusClass}>${statusIcon}${filePath.split('\\\\').pop().split('/').pop()} (${fileInfo.status})</li>`;
+                }
+                
+                if (filteredFiles.length === 0) {
+                    fileListDiv.innerHTML += '<li>Нет файлов для отображения с выбранным фильтром</li>';
+                }
+                
+                fileListDiv.innerHTML += '</ul>';
+            } else {
+                fileListDiv.innerHTML = '<p>Нет отслеживаемых файлов</p>';
+            }
+        }
+        
+        // Enhanced getConversionProgress that stores data globally
+        async function getConversionProgress() {
+            const progressDiv = document.getElementById('progress-summary');
+            const button = document.getElementById('refresh-progress-btn');
+            
+            button.disabled = true;
+            button.textContent = 'Загрузка...';
+            
+            try {
+                const response = await fetch('/api/indexing/progress', {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                // Store the data globally so we can filter it
+                window.conversionData = await response.json();
+                const data = window.conversionData;
+                
+                // Обновляем сводку прогресса
+                progressDiv.innerHTML = `
+                    <p><strong>Всего файлов:</strong> ${data.total}</p>
+                    <p><strong>Обработано:</strong> ${data.converted} | <strong>Ошибки:</strong> ${data.errors} | <strong>В процессе:</strong> ${data.in_progress} | <strong>Ожидает:</strong> ${data.pending}</p>
+                    <div style="height: 20px; background-color: #eee; border-radius: 10px; overflow: hidden;">
+                        <div style="height: 100%; width: ${data.total > 0 ? (data.converted / data.total * 100) : 0}%; background-color: #28a745; float: left;"></div>
+                        <div style="height: 100%; width: ${data.total > 0 ? (data.errors / data.total * 100) : 0}%; background-color: #dc3545; float: left;"></div>
+                        <div style="height: 100%; width: ${data.total > 0 ? (data.in_progress / data.total * 100) : 0}%; background-color: #ffc107; float: left;"></div>
+                    </div>
+                `;
+                
+                // Now apply filtering and display
+                filterAndDisplayFiles();
+            } catch (error) {
+                progressDiv.innerHTML = '<span style="color: red;">Ошибка загрузки прогресса: ' + error.message + '</span>';
+                document.getElementById('file-list').innerHTML = '';
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Обновить прогресс';
+            }
+        }
+        
+        // Загружаем прогресс при загрузке страницы
+        document.addEventListener('DOMContentLoaded', function() {
+            getConversionProgress();
+            // Обновляем прогресс каждые 30 секунд
+            setInterval(getConversionProgress, 30000);
+        });
         
         async function deleteCollection(collectionName) {
             if (!confirm(`Вы уверены, что хотите удалить коллекцию "${collectionName}"? Это действие необратимо.`)) {
