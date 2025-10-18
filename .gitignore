@@ -104,3 +104,6 @@ models/
 collect_source_code.py
 project_source_code.txt
 scripts/project_source_code_additional.txt
+
+# Log clearing script
+scripts/clear_log.py
