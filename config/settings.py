@@ -11,6 +11,165 @@ from config.resource_path import resource_path
 from core.models.config import MainConfig
 
 
+# Определение алиасов вне класса, чтобы избежать конфликта с Pydantic
+# Все алиасы, требуемые приложением, включая стандартные имена для обратной совместимости
+_ALIAS_MAP = {
+    # indexing aliases - both simple and prefixed versions for compatibility
+    'folder_path': 'indexing.folder_path',
+    'collection_name': 'indexing.collection_name',
+    'chunk_size': 'indexing.chunk_size',
+    'indexing_chunk_size': 'indexing.chunk_size',  # Original prefixed version
+    'chunk_overlap': 'indexing.chunk_overlap',
+    'indexing_chunk_overlap': 'indexing.chunk_overlap',  # Original prefixed version
+    'chunking_strategy': 'indexing.chunking_strategy',
+    'indexing_chunking_strategy': 'indexing.chunking_strategy',  # Original prefixed version
+    'paragraphs_per_chunk': 'indexing.paragraphs_per_chunk',
+    'indexing_paragraphs_per_chunk': 'indexing.paragraphs_per_chunk',  # Original prefixed version
+    'paragraph_overlap': 'indexing.paragraph_overlap',
+    'indexing_paragraph_overlap': 'indexing.paragraph_overlap',  # Original prefixed version
+    'sentences_per_chunk': 'indexing.sentences_per_chunk',
+    'indexing_sentences_per_chunk': 'indexing.sentences_per_chunk',  # Original prefixed version
+    'sentence_overlap': 'indexing.sentence_overlap',
+    'indexing_sentence_overlap': 'indexing.sentence_overlap',  # Original prefixed version
+    'use_multilevel_chunking': 'indexing.use_multilevel_chunking',
+    'index_dense': 'indexing.index_dense',
+    'indexing_index_dense': 'indexing.index_dense',  # Original prefixed version
+    'index_bm25': 'indexing.index_bm25',
+    'indexing_index_bm25': 'indexing.index_bm25',  # Original prefixed version
+    'index_hybrid': 'indexing.index_hybrid',
+    'indexing_index_hybrid': 'indexing.index_hybrid',  # Original prefixed version
+    'embedding_batch_size': 'embedding.batch_size',
+    'indexing_batch_size': 'indexing.batch_size',
+    'force_recreate': 'indexing.force_recreate',
+    'indexing_force_recreate': 'indexing.force_recreate',  # Original prefixed version
+    'memory_threshold': 'indexing.memory_threshold',
+    'indexing_memory_threshold': 'indexing.memory_threshold',  # Original prefixed version
+    'sparse_embedding': 'indexing.sparse_embedding',
+    'indexing_sparse_embedding': 'indexing.sparse_embedding',  # Original prefixed version
+    'is_indexed': 'indexing.is_indexed',
+    'indexing_is_indexed': 'indexing.is_indexed',  # Original prefixed version
+    
+    # embedding aliases
+    'current_hf_model': 'embedding.current_hf_model',
+    'hf_model_history': 'embedding.hf_model_history',
+    'device': 'embedding.device',
+    
+    # qdrant aliases
+    'qdrant_url': 'qdrant.url',
+    'qdrant_retry_attempts': 'qdrant.retry_attempts',
+    'qdrant_retry_wait_time': 'qdrant.retry_wait_time',
+    
+    # mineru aliases
+    'mineru_input_pdf_dir': 'mineru.input_pdf_dir',
+    'mineru_output_md_dir': 'mineru.output_md_dir',
+    'mineru_enable_formula_parsing': 'mineru.enable_formula_parsing',
+    'mineru_enable_table_parsing': 'mineru.enable_table_parsing',
+    'mineru_model_source': 'mineru.model_source',
+    'mineru_models_dir': 'mineru.models_dir',
+    'mineru_backend': 'mineru.backend',
+    'mineru_method': 'mineru.method',
+    'mineru_lang': 'mineru.lang',
+    'mineru_sglang_url': 'mineru.sglang_url',
+    'mineru_subprocess_timeout': 'mineru.subprocess_timeout',
+    
+    # docling aliases - These were removed from MainConfig but kept for backward compatibility
+    'docling_use_ocr': 'docling.use_ocr',
+    'docling_use_tables': 'docling.use_tables',
+    'docling_use_formulas': 'docling.use_formulas',
+    'docling_model_backend': 'docling.model_backend',
+    'docling_ocr_model': 'docling.ocr_model',
+    'docling_ocr_lang': 'docling.ocr_lang',
+    'docling_images_dir': 'docling.images_dir',
+    'docling_table_mode': 'docling.table_mode',
+    'docling_enable_page_images': 'docling.enable_page_images',
+    'docling_table_detection_advanced': 'docling.table_detection_advanced',
+    'docling_formula_detection_advanced': 'docling.formula_detection_advanced',
+    'docling_backend': 'docling.backend',
+    'docling_device': 'docling.device',
+    'docling_granite_models_dir': 'docling.granite_models_dir',
+    
+    # search aliases
+    'search_default_k': 'search.default_k',
+    'use_hybrid': 'search.use_hybrid',
+    'search_use_hybrid': 'search.use_hybrid',  # Original prefixed version
+    'hybrid_alpha': 'search.hybrid_alpha',
+    'search_hybrid_alpha': 'search.hybrid_alpha',  # Original prefixed version
+    'search_default_collection': 'search.default_collection',
+    'search_default_device': 'search.default_device',
+    'search_default_type': 'search.default_type',
+    'search_default_use_reranker': 'search.default_use_reranker',
+    
+    # reranker aliases
+    'reranker_enabled': 'reranker.enabled',
+    'reranker_model': 'reranker.model',
+    'reranker_top_k': 'reranker.top_k',
+    
+    # bm25 aliases
+    'use_bm25': 'bm25.enabled',
+    'sparse_vector_name': 'bm25.sparse_vector_name',
+    'bm25_sparse_vector_name': 'bm25.sparse_vector_name',  # Original prefixed version
+    'bm25_tokenizer': 'bm25.tokenizer',
+    'bm25_min_token_len': 'bm25.min_token_len',
+    
+    # cache aliases
+    'config_cache_ttl': 'cache.config_cache_ttl',
+    'qdrant_client_cache_ttl': 'cache.qdrant_client_cache_ttl',
+    'collections_cache_ttl': 'cache.collections_cache_ttl',
+    
+    # embedding specific aliases
+    'gguf_model_n_ctx': 'embedding.gguf.model_n_ctx',
+    
+    # metadata aliases
+    'enable_metadata_extraction': 'metadata.enable_extraction',
+    'custom_fields': 'metadata.custom_fields',  # Also support non-prefixed version
+    'metadata_custom_fields': 'metadata.custom_fields',
+    'metadata_extract_pdf': 'metadata.extract_pdf',
+    'metadata_extract_image': 'metadata.extract_image',
+    'metadata_extract_docx': 'metadata.extract_docx',
+    
+    # rag aliases
+    'rag_enabled': 'rag.enabled',
+    'rag_model_path': 'rag.model_path',
+    'rag_system_prompt': 'rag.system_prompt',
+    'rag_top_k': 'rag.top_k',
+    'rag_max_tokens': 'rag.max_tokens',
+    'rag_temperature': 'rag.temperature',
+    'rag_context_size': 'rag.context_size',
+    'rag_gpu_layers': 'rag.gpu_layers',
+    'rag_threads': 'rag.threads',
+    'rag_batch_size': 'rag.batch_size',
+    'rag_beam_size': 'rag.beam_size',
+    
+    # model path aliases
+    'local_models_path': 'model_paths.local_models_path',
+    'huggingface_cache_path': 'model_paths.huggingface_cache_path',
+    'easyocr_models_path': 'model_paths.easyocr_models_path',
+    'fastembed_cache_path': 'model_paths.fastembed_cache_path',
+    'use_local_only': 'model_paths.use_local_only',
+    'auto_download_models': 'model_paths.auto_download_models',
+    
+    # Multilevel chunker aliases - These were removed from MainConfig but kept for backward compatibility
+    'multilevel_macro_strategy': 'multilevel_chunker.macro_strategy',
+    'multilevel_macro_chunk_size': 'multilevel_chunker.macro_chunk_size',
+    'multilevel_macro_chunk_overlap': 'multilevel_chunker.macro_chunk_overlap',
+    'multilevel_macro_paragraphs_per_chunk': 'multilevel_chunker.macro_paragraphs_per_chunk',
+    'multilevel_macro_paragraph_overlap': 'multilevel_chunker.macro_paragraph_overlap',
+    'multilevel_macro_sentences_per_chunk': 'multilevel_chunker.macro_sentences_per_chunk',
+    'multilevel_macro_sentence_overlap': 'multilevel_chunker.macro_sentence_overlap',
+    'multilevel_micro_strategy': 'multilevel_chunker.micro_strategy',
+    'multilevel_micro_chunk_size': 'multilevel_chunker.micro_chunk_size',
+    'multilevel_micro_chunk_overlap': 'multilevel_chunker.micro_chunk_overlap',
+    'multilevel_micro_paragraphs_per_chunk': 'multilevel_chunker.micro_paragraphs_per_chunk',
+    'multilevel_micro_paragraph_overlap': 'multilevel_chunker.micro_paragraph_overlap',
+    'multilevel_micro_sentences_per_chunk': 'multilevel_chunker.micro_sentences_per_chunk',
+    'multilevel_micro_sentence_overlap': 'multilevel_chunker.micro_sentence_overlap',
+    
+    # Additional consistency aliases
+    'granite_models_dir': 'docling.granite_models_dir',  # Duplicate alias
+    'indexing_default_batch_size': 'indexing.batch_size',  # Same as indexing.batch_size
+}
+
+
 class Config(BaseSettings):
     """Модель конфигурации приложения с автоматической загрузкой из различных источников."""
     
@@ -24,7 +183,7 @@ class Config(BaseSettings):
     
     # Вложенные конфигурации
     main: MainConfig = Field(default_factory=MainConfig, description="Основная конфигурация")
-    
+
     def __getattribute__(self, name: str):
         """Delegate attribute access to main config using dot-path notation."""
         # Use object.__getattribute__ to avoid recursion and bypass Pydantic's attribute access
@@ -34,8 +193,6 @@ class Config(BaseSettings):
             result = object.__getattribute__(self, name)
             return result
         except AttributeError:
-            # Debug: print when delegation is happening
-            # print(f"Delegating access for {name}")
             # If it's not a normal attribute, try delegation to main config
             try:
                 main = object.__getattribute__(self, "main")
@@ -45,199 +202,65 @@ class Config(BaseSettings):
             # Handle dot-notation paths
             if "." in name:
                 if hasattr(main, "get_nested"):
-                    result = main.get_nested(name)
-                    # print(f"Delegated {name} -> {result}")
-                    return result
+                    return main.get_nested(name)
                 # fallback simple traversal
                 obj = main
                 for part in name.split('.'):
                     obj = getattr(obj, part)
                 return obj
-            # Handle single-level attributes that exist in main
-            # For backward compatibility, map simple names to their actual paths
-            # The original properties were shortcuts for nested paths
-            elif hasattr(main, name):
-                result = getattr(main, name)
-                # print(f"Delegated {name} -> {result}")
-                return result
-            # If direct attribute doesn't exist, try common aliases
+            # Try the alias mapping first (for prefixed/legacy names)
+            elif name in _ALIAS_MAP:
+                actual_path = _ALIAS_MAP[name]
+                if hasattr(main, "get_nested"):
+                    return main.get_nested(actual_path)
+                else:
+                    # fallback: split path and traverse
+                    obj = main
+                    for part in actual_path.split('.'):
+                        obj = getattr(obj, part)
+                    return obj
+            # Handle special cases like huggingface_token that was stored as _huggingface_token
+            elif name == 'huggingface_token':
+                return getattr(self, '_huggingface_token', None)
+            # For non-alias direct attribute access, try to find it in main or its nested structures
             else:
-                # Map common aliases to their actual paths
-                # Note: These are the aliases for legacy flattened access patterns
-                alias_mapping = {
-                    # indexing aliases - both simple and prefixed versions for compatibility
-                    'folder_path': 'indexing.folder_path',
-                    'collection_name': 'indexing.collection_name',
-                    'chunk_size': 'indexing.chunk_size',
-                    'indexing_chunk_size': 'indexing.chunk_size',  # Original prefixed version
-                    'chunk_overlap': 'indexing.chunk_overlap',
-                    'indexing_chunk_overlap': 'indexing.chunk_overlap',  # Original prefixed version
-                    'chunking_strategy': 'indexing.chunking_strategy',
-                    'indexing_chunking_strategy': 'indexing.chunking_strategy',  # Original prefixed version
-                    'paragraphs_per_chunk': 'indexing.paragraphs_per_chunk',
-                    'indexing_paragraphs_per_chunk': 'indexing.paragraphs_per_chunk',  # Original prefixed version
-                    'paragraph_overlap': 'indexing.paragraph_overlap',
-                    'indexing_paragraph_overlap': 'indexing.paragraph_overlap',  # Original prefixed version
-                    'sentences_per_chunk': 'indexing.sentences_per_chunk',
-                    'indexing_sentences_per_chunk': 'indexing.sentences_per_chunk',  # Original prefixed version
-                    'sentence_overlap': 'indexing.sentence_overlap',
-                    'indexing_sentence_overlap': 'indexing.sentence_overlap',  # Original prefixed version
-                    'use_multilevel_chunking': 'indexing.use_multilevel_chunking',
-                    'index_dense': 'indexing.index_dense',
-                    'indexing_index_dense': 'indexing.index_dense',  # Original prefixed version
-                    'index_bm25': 'indexing.index_bm25',
-                    'indexing_index_bm25': 'indexing.index_bm25',  # Original prefixed version
-                    'index_hybrid': 'indexing.index_hybrid',
-                    'indexing_index_hybrid': 'indexing.index_hybrid',  # Original prefixed version
-                    'embedding_batch_size': 'embedding.batch_size',
-                    'indexing_batch_size': 'indexing.batch_size',
-                    'force_recreate': 'indexing.force_recreate',
-                    'indexing_force_recreate': 'indexing.force_recreate',  # Original prefixed version
-                    'memory_threshold': 'indexing.memory_threshold',
-                    'indexing_memory_threshold': 'indexing.memory_threshold',  # Original prefixed version
-                    'sparse_embedding': 'indexing.sparse_embedding',
-                    'indexing_sparse_embedding': 'indexing.sparse_embedding',  # Original prefixed version
-                    'is_indexed': 'indexing.is_indexed',
-                    'indexing_is_indexed': 'indexing.is_indexed',  # Original prefixed version
+                # If not found in alias map, try to find it in nested structures
+                # For backward compatibility, non-prefixed names might map to nested paths
+                # We'll try to find attributes that don't have prefixes
+                # This is handled by checking if the attribute exists in any of the nested configs
+                try:
+                    # Try common paths where non-prefixed attributes might be
+                    nested_names = [
+                        f"indexing.{name}",
+                        f"embedding.{name}",
+                        f"qdrant.{name}",
+                        f"search.{name}",
+                        f"docling.{name}",
+                        f"bm25.{name}",
+                        f"cache.{name}",
+                        f"metadata.{name}",
+                        f"rag.{name}",
+                        f"model_paths.{name}",
+                        f"mineru.{name}",
+                        f"multilevel_chunker.{name}",
+                    ]
                     
-                    # embedding aliases
-                    'current_hf_model': 'embedding.current_hf_model',
-                    'hf_model_history': 'embedding.hf_model_history',
-                    'device': 'embedding.device',
-                    
-                    # qdrant aliases
-                    'qdrant_url': 'qdrant.url',
-                    'qdrant_retry_attempts': 'qdrant.retry_attempts',
-                    'qdrant_retry_wait_time': 'qdrant.retry_wait_time',
-                    
-                    # mineru aliases
-                    'mineru_input_pdf_dir': 'mineru.input_pdf_dir',
-                    'mineru_output_md_dir': 'mineru.output_md_dir',
-                    'mineru_enable_formula_parsing': 'mineru.enable_formula_parsing',
-                    'mineru_enable_table_parsing': 'mineru.enable_table_parsing',
-                    'mineru_model_source': 'mineru.model_source',
-                    'mineru_models_dir': 'mineru.models_dir',
-                    'mineru_backend': 'mineru.backend',
-                    'mineru_method': 'mineru.method',
-                    'mineru_lang': 'mineru.lang',
-                    'mineru_sglang_url': 'mineru.sglang_url',
-                    'mineru_subprocess_timeout': 'mineru.subprocess_timeout',
-                    
-                    # docling aliases - These were removed from MainConfig but kept for backward compatibility
-                    'docling_use_ocr': 'docling.use_ocr',
-                    'docling_use_tables': 'docling.use_tables',
-                    'docling_use_formulas': 'docling.use_formulas',
-                    'docling_model_backend': 'docling.model_backend',
-                    'docling_ocr_model': 'docling.ocr_model',
-                    'docling_ocr_lang': 'docling.ocr_lang',
-                    'docling_images_dir': 'docling.images_dir',
-                    'docling_table_mode': 'docling.table_mode',
-                    'docling_enable_page_images': 'docling.enable_page_images',
-                    'docling_table_detection_advanced': 'docling.table_detection_advanced',
-                    'docling_formula_detection_advanced': 'docling.formula_detection_advanced',
-                    'docling_backend': 'docling.backend',
-                    'docling_device': 'docling.device',
-                    'docling_granite_models_dir': 'docling.granite_models_dir',
-                    
-                    # search aliases
-                    'search_default_k': 'search.default_k',
-                    'use_hybrid': 'search.use_hybrid',
-                    'search_use_hybrid': 'search.use_hybrid',  # Original prefixed version
-                    'hybrid_alpha': 'search.hybrid_alpha',
-                    'search_hybrid_alpha': 'search.hybrid_alpha',  # Original prefixed version
-                    'search_default_collection': 'search.default_collection',
-                    'search_default_device': 'search.default_device',
-                    'search_default_type': 'search.default_type',
-                    'search_default_use_reranker': 'search.default_use_reranker',
-                    
-                    # reranker aliases
-                    'reranker_enabled': 'reranker.enabled',
-                    'reranker_model': 'reranker.model',
-                    'reranker_top_k': 'reranker.top_k',
-                    
-                    # bm25 aliases
-                    'use_bm25': 'bm25.enabled',
-                    'sparse_vector_name': 'bm25.sparse_vector_name',
-                    'bm25_sparse_vector_name': 'bm25.sparse_vector_name',  # Original prefixed version
-                    'bm25_tokenizer': 'bm25.tokenizer',
-                    'bm25_min_token_len': 'bm25.min_token_len',
-                    
-                    # cache aliases
-                    'config_cache_ttl': 'cache.config_cache_ttl',
-                    'qdrant_client_cache_ttl': 'cache.qdrant_client_cache_ttl',
-                    'collections_cache_ttl': 'cache.collections_cache_ttl',
-                    
-                    # embedding specific aliases
-                    'gguf_model_n_ctx': 'embedding.gguf.model_n_ctx',
-                    
-                    # metadata aliases
-                    'enable_metadata_extraction': 'metadata.enable_extraction',
-                    'custom_fields': 'metadata.custom_fields',  # Also support non-prefixed version
-                    'metadata_custom_fields': 'metadata.custom_fields',
-                    'metadata_extract_pdf': 'metadata.extract_pdf',
-                    'metadata_extract_image': 'metadata.extract_image',
-                    'metadata_extract_docx': 'metadata.extract_docx',
-                    
-                    # rag aliases
-                    'rag_enabled': 'rag.enabled',
-                    'rag_model_path': 'rag.model_path',
-                    'rag_system_prompt': 'rag.system_prompt',
-                    'rag_top_k': 'rag.top_k',
-                    'rag_max_tokens': 'rag.max_tokens',
-                    'rag_temperature': 'rag.temperature',
-                    'rag_context_size': 'rag.context_size',
-                    'rag_gpu_layers': 'rag.gpu_layers',
-                    'rag_threads': 'rag.threads',
-                    'rag_batch_size': 'rag.batch_size',
-                    'rag_beam_size': 'rag.beam_size',
-                    
-                    # model path aliases
-                    'local_models_path': 'model_paths.local_models_path',
-                    'huggingface_cache_path': 'model_paths.huggingface_cache_path',
-                    'easyocr_models_path': 'model_paths.easyocr_models_path',
-                    'fastembed_cache_path': 'model_paths.fastembed_cache_path',
-                    'use_local_only': 'model_paths.use_local_only',
-                    'auto_download_models': 'model_paths.auto_download_models',
-                    
-                    # Multilevel chunker aliases - These were removed from MainConfig but kept for backward compatibility
-                    'multilevel_macro_strategy': 'multilevel_chunker.macro_strategy',
-                    'multilevel_macro_chunk_size': 'multilevel_chunker.macro_chunk_size',
-                    'multilevel_macro_chunk_overlap': 'multilevel_chunker.macro_chunk_overlap',
-                    'multilevel_macro_paragraphs_per_chunk': 'multilevel_chunker.macro_paragraphs_per_chunk',
-                    'multilevel_macro_paragraph_overlap': 'multilevel_chunker.macro_paragraph_overlap',
-                    'multilevel_macro_sentences_per_chunk': 'multilevel_chunker.macro_sentences_per_chunk',
-                    'multilevel_macro_sentence_overlap': 'multilevel_chunker.macro_sentence_overlap',
-                    'multilevel_micro_strategy': 'multilevel_chunker.micro_strategy',
-                    'multilevel_micro_chunk_size': 'multilevel_chunker.micro_chunk_size',
-                    'multilevel_micro_chunk_overlap': 'multilevel_chunker.micro_chunk_overlap',
-                    'multilevel_micro_paragraphs_per_chunk': 'multilevel_chunker.micro_paragraphs_per_chunk',
-                    'multilevel_micro_paragraph_overlap': 'multilevel_chunker.micro_paragraph_overlap',
-                    'multilevel_micro_sentences_per_chunk': 'multilevel_chunker.micro_sentences_per_chunk',
-                    'multilevel_micro_sentence_overlap': 'multilevel_chunker.micro_sentence_overlap',
-                    
-                    # Additional consistency aliases
-                    'granite_models_dir': 'docling.granite_models_dir',  # Duplicate alias
-                    'indexing_default_batch_size': 'indexing.batch_size',  # Same as indexing.batch_size
-                }
+                    for nested_name in nested_names:
+                        try:
+                            if hasattr(main, "get_nested"):
+                                return main.get_nested(nested_name)
+                            else:
+                                # fallback: split path and traverse
+                                obj = main
+                                for part in nested_name.split('.'):
+                                    obj = getattr(obj, part)
+                                return obj
+                        except (AttributeError, KeyError):
+                            continue  # Try the next path
+                except Exception:
+                    pass  # Fall through to final error
                 
-                if name in alias_mapping:
-                    actual_path = alias_mapping[name]
-                    if hasattr(main, "get_nested"):
-                        result = main.get_nested(actual_path)
-                        # print(f"Delegated alias {name} -> {actual_path} -> {result}")
-                        return result
-                    else:
-                        # fallback: split path and traverse
-                        obj = main
-                        for part in actual_path.split('.'):
-                            obj = getattr(obj, part)
-                        return obj
-                
-                # Handle special cases like huggingface_token that was stored as _huggingface_token
-                if name == 'huggingface_token':
-                    return getattr(self, '_huggingface_token', None)
-                
-                # If no alias matches, raise AttributeError
+                # If no alias matches and no nested attribute exists, raise AttributeError
                 raise AttributeError(f"{self.__class__.__name__} has no attribute {name!r}")
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -268,167 +291,8 @@ class Config(BaseSettings):
         # Handle alias mappings for backward compatibility first
         # Map common aliases to their actual paths
         # Note: These are the aliases for legacy flattened access patterns
-        alias_mapping = {
-            # indexing aliases
-            'folder_path': 'indexing.folder_path',
-            # indexing aliases - both simple and prefixed versions for compatibility
-            'folder_path': 'indexing.folder_path',
-            'collection_name': 'indexing.collection_name',
-            'chunk_size': 'indexing.chunk_size',
-            'indexing_chunk_size': 'indexing.chunk_size',  # Original prefixed version
-            'chunk_overlap': 'indexing.chunk_overlap',
-            'indexing_chunk_overlap': 'indexing.chunk_overlap',  # Original prefixed version
-            'chunking_strategy': 'indexing.chunking_strategy',
-            'indexing_chunking_strategy': 'indexing.chunking_strategy',  # Original prefixed version
-            'paragraphs_per_chunk': 'indexing.paragraphs_per_chunk',
-            'indexing_paragraphs_per_chunk': 'indexing.paragraphs_per_chunk',  # Original prefixed version
-            'paragraph_overlap': 'indexing.paragraph_overlap',
-            'indexing_paragraph_overlap': 'indexing.paragraph_overlap',  # Original prefixed version
-            'sentences_per_chunk': 'indexing.sentences_per_chunk',
-            'indexing_sentences_per_chunk': 'indexing.sentences_per_chunk',  # Original prefixed version
-            'sentence_overlap': 'indexing.sentence_overlap',
-            'indexing_sentence_overlap': 'indexing.sentence_overlap',  # Original prefixed version
-            'use_multilevel_chunking': 'indexing.use_multilevel_chunking',
-            'index_dense': 'indexing.index_dense',
-            'indexing_index_dense': 'indexing.index_dense',  # Original prefixed version
-            'index_bm25': 'indexing.index_bm25',
-            'indexing_index_bm25': 'indexing.index_bm25',  # Original prefixed version
-            'index_hybrid': 'indexing.index_hybrid',
-            'indexing_index_hybrid': 'indexing.index_hybrid',  # Original prefixed version
-            'embedding_batch_size': 'embedding.batch_size',
-            'indexing_batch_size': 'indexing.batch_size',
-            'force_recreate': 'indexing.force_recreate',
-            'indexing_force_recreate': 'indexing.force_recreate',  # Original prefixed version
-            'memory_threshold': 'indexing.memory_threshold',
-            'indexing_memory_threshold': 'indexing.memory_threshold',  # Original prefixed version
-            'sparse_embedding': 'indexing.sparse_embedding',
-            'indexing_sparse_embedding': 'indexing.sparse_embedding',  # Original prefixed version
-            'is_indexed': 'indexing.is_indexed',
-            'indexing_is_indexed': 'indexing.is_indexed',  # Original prefixed version
-            
-            # embedding aliases
-            'current_hf_model': 'embedding.current_hf_model',
-            'hf_model_history': 'embedding.hf_model_history',
-            'device': 'embedding.device',
-            
-            # qdrant aliases
-            'qdrant_url': 'qdrant.url',
-            'qdrant_retry_attempts': 'qdrant.retry_attempts',
-            'qdrant_retry_wait_time': 'qdrant.retry_wait_time',
-            
-            # mineru aliases
-            'mineru_input_pdf_dir': 'mineru.input_pdf_dir',
-            'mineru_output_md_dir': 'mineru.output_md_dir',
-            'mineru_enable_formula_parsing': 'mineru.enable_formula_parsing',
-            'mineru_enable_table_parsing': 'mineru.enable_table_parsing',
-            'mineru_model_source': 'mineru.model_source',
-            'mineru_models_dir': 'mineru.models_dir',
-            'mineru_backend': 'mineru.backend',
-            'mineru_method': 'mineru.method',
-            'mineru_lang': 'mineru.lang',
-            'mineru_sglang_url': 'mineru.sglang_url',
-            'mineru_subprocess_timeout': 'mineru.subprocess_timeout',
-            
-            # docling aliases - These were removed from MainConfig but kept for backward compatibility
-            'docling_use_ocr': 'docling.use_ocr',
-            'docling_use_tables': 'docling.use_tables',
-            'docling_use_formulas': 'docling.use_formulas',
-            'docling_model_backend': 'docling.model_backend',
-            'docling_ocr_model': 'docling.ocr_model',
-            'docling_ocr_lang': 'docling.ocr_lang',
-            'docling_images_dir': 'docling.images_dir',
-            'docling_table_mode': 'docling.table_mode',
-            'docling_enable_page_images': 'docling.enable_page_images',
-            'docling_table_detection_advanced': 'docling.table_detection_advanced',
-            'docling_formula_detection_advanced': 'docling.formula_detection_advanced',
-            'docling_backend': 'docling.backend',
-            'docling_device': 'docling.device',
-            'docling_granite_models_dir': 'docling.granite_models_dir',
-            
-            # search aliases
-            'search_default_k': 'search.default_k',
-            'use_hybrid': 'search.use_hybrid',
-            'search_use_hybrid': 'search.use_hybrid',  # Original prefixed version
-            'hybrid_alpha': 'search.hybrid_alpha',
-            'search_hybrid_alpha': 'search.hybrid_alpha',  # Original prefixed version
-            'search_default_collection': 'search.default_collection',
-            'search_default_device': 'search.default_device',
-            'search_default_type': 'search.default_type',
-            'search_default_use_reranker': 'search.default_use_reranker',
-            
-            # reranker aliases
-            'reranker_enabled': 'reranker.enabled',
-            'reranker_model': 'reranker.model',
-            'reranker_top_k': 'reranker.top_k',
-            
-            # bm25 aliases
-            'use_bm25': 'bm25.enabled',
-            'sparse_vector_name': 'bm25.sparse_vector_name',
-            'bm25_sparse_vector_name': 'bm25.sparse_vector_name',  # Original prefixed version
-            'bm25_tokenizer': 'bm25.tokenizer',
-            'bm25_min_token_len': 'bm25.min_token_len',
-            
-            # cache aliases
-            'config_cache_ttl': 'cache.config_cache_ttl',
-            'qdrant_client_cache_ttl': 'cache.qdrant_client_cache_ttl',
-            'collections_cache_ttl': 'cache.collections_cache_ttl',
-            
-            # embedding specific aliases
-            'gguf_model_n_ctx': 'embedding.gguf.model_n_ctx',
-            
-            # metadata aliases
-            'enable_metadata_extraction': 'metadata.enable_extraction',
-            'custom_fields': 'metadata.custom_fields',  # Also support non-prefixed version
-            'metadata_custom_fields': 'metadata.custom_fields',
-            'metadata_extract_pdf': 'metadata.extract_pdf',  # Fixed from extract_docx
-            'metadata_extract_image': 'metadata.extract_image',
-            'metadata_extract_docx': 'metadata.extract_docx',
-            
-            # rag aliases
-            'rag_enabled': 'rag.enabled',
-            'rag_model_path': 'rag.model_path',
-            'rag_system_prompt': 'rag.system_prompt',
-            'rag_top_k': 'rag.top_k',
-            'rag_max_tokens': 'rag.max_tokens',
-            'rag_temperature': 'rag.temperature',
-            'rag_context_size': 'rag.context_size',
-            'rag_gpu_layers': 'rag.gpu_layers',
-            'rag_threads': 'rag.threads',
-            'rag_batch_size': 'rag.batch_size',
-            'rag_beam_size': 'rag.beam_size',
-            
-            # model path aliases
-            'local_models_path': 'model_paths.local_models_path',
-            'huggingface_cache_path': 'model_paths.huggingface_cache_path',
-            'easyocr_models_path': 'model_paths.easyocr_models_path',
-            'fastembed_cache_path': 'model_paths.fastembed_cache_path',
-            'use_local_only': 'model_paths.use_local_only',
-            'auto_download_models': 'model_paths.auto_download_models',
-            
-            # Multilevel chunker aliases - These were removed from MainConfig but kept for backward compatibility
-            'multilevel_macro_strategy': 'multilevel_chunker.macro_strategy',
-            'multilevel_macro_chunk_size': 'multilevel_chunker.macro_chunk_size',
-            'multilevel_macro_chunk_overlap': 'multilevel_chunker.macro_chunk_overlap',
-            'multilevel_macro_paragraphs_per_chunk': 'multilevel_chunker.macro_paragraphs_per_chunk',
-            'multilevel_macro_paragraph_overlap': 'multilevel_chunker.macro_paragraph_overlap',
-            'multilevel_macro_sentences_per_chunk': 'multilevel_chunker.macro_sentences_per_chunk',
-            'multilevel_macro_sentence_overlap': 'multilevel_chunker.macro_sentence_overlap',
-            'multilevel_micro_strategy': 'multilevel_chunker.micro_strategy',
-            'multilevel_micro_chunk_size': 'multilevel_chunker.micro_chunk_size',
-            'multilevel_micro_chunk_overlap': 'multilevel_chunker.micro_chunk_overlap',
-            'multilevel_micro_paragraphs_per_chunk': 'multilevel_chunker.micro_paragraphs_per_chunk',
-            'multilevel_micro_paragraph_overlap': 'multilevel_chunker.micro_paragraph_overlap',
-            'multilevel_micro_sentences_per_chunk': 'multilevel_chunker.micro_sentences_per_chunk',
-            'multilevel_micro_sentence_overlap': 'multilevel_chunker.micro_sentence_overlap',
-            
-            # Additional consistency aliases
-            'granite_models_dir': 'docling.granite_models_dir',  # Duplicate alias
-            'indexing_default_batch_size': 'indexing.batch_size',  # Same as indexing.batch_size
-        }
-        
-        # Check if name is in alias mapping first
-        if name in alias_mapping:
-            actual_path = alias_mapping[name]
+        if name in _ALIAS_MAP:
+            actual_path = _ALIAS_MAP[name]
             try:
                 main = super().__getattribute__("main")
             except Exception:
@@ -455,7 +319,7 @@ class Config(BaseSettings):
         
         # Only try to set direct attributes if they're not in alias mapping
         # This avoids the issue with properties that only have getters
-        if hasattr(main, name) and name not in alias_mapping:
+        if hasattr(main, name) and name not in _ALIAS_MAP:
             setattr(main, name, value)
             return
         
