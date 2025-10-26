@@ -78,6 +78,16 @@ class DoclingConverter:
 
 
 
+    def _ensure_ocr_lang_list(self, lang):
+        """Ensure lang is a list of strings for EasyOcrOptions."""
+        if isinstance(lang, str):
+            return [lang]
+        elif isinstance(lang, list):
+            return lang
+        else:
+            # Default to Russian if unexpected type
+            return ["ru"]
+
     def _initialize_converter(self):
         """Инициализация конвертера Docling с настройками из конфигурации."""
         config = self.config_manager.get()
@@ -98,12 +108,15 @@ class DoclingConverter:
 
         if backend == "granite":
             # Granite uses VlmPipeline with TRANSFORMERS (for CPU/GPU)
+            # Ensure lang is always a list for EasyOcrOptions
+            ocr_lang_list = self._ensure_ocr_lang_list(config.docling_ocr_lang)
+            
             vlm_options = VlmPipelineOptions(
                 vlm_model_specs=vlm_model_specs.GRANITEDOCLING_TRANSFORMERS,  # Правильная константа для CPU/GPU
                 accelerator_options=accelerator,
                 table_structure_options=TableStructureOptions(
                     table_former_mode=TABLE_FORMER_MODE,
-                    ocr_options=EasyOcrOptions(lang=config.docling_ocr_lang),
+                    ocr_options=EasyOcrOptions(lang=ocr_lang_list),
                 ) if config.docling_use_ocr else None,
                 local_files_only=(os.environ.get("TRANSFORMERS_OFFLINE") == "1"),
                 enable_ocr=config.docling_use_ocr,
@@ -125,7 +138,9 @@ class DoclingConverter:
             }
             
             if config.docling_use_ocr:
-                kwargs["ocr_options"] = EasyOcrOptions(lang=config.docling_ocr_lang)
+                # Ensure lang is always a list for EasyOcrOptions
+                ocr_lang_list = self._ensure_ocr_lang_list(config.docling_ocr_lang)
+                kwargs["ocr_options"] = EasyOcrOptions(lang=ocr_lang_list)
             
             if config.docling_use_tables:
                 kwargs["table_structure_options"] = TableStructureOptions(

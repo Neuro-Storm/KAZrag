@@ -83,6 +83,7 @@ models/*.gguf
 *.bak
 *~
 123.txt
+file_tracking.json
 
 # Документы Microsoft Word
 *.docx
@@ -90,6 +91,7 @@ models/*.gguf
 # Игнорировать резервные файлы и временные файлы
 Обновленный_план-график_KAZrag.md
 IMPLEMENTATION_PLAN.md
+error_report.md
 
 # Директории с данными
 pdfs_to_process/
@@ -106,7 +108,7 @@ project_source_code.txt
 scripts/project_source_code_additional.txt
 
 # Log clearing script
-scripts/clear_log.py
-
+scripts/
 # Memory optimization script
 scripts/fix_memory_issues.py
+
