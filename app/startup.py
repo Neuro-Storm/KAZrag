@@ -45,6 +45,25 @@ def startup_event_handler() -> None:
         except Exception as e:
             logger.exception(f"Error initializing Docling converter: {e}")
             
+        # Проверяем и загружаем Granite-модель при старте, если backend=granite
+        try:
+            config = config_manager.get()
+            if config.docling_backend == "granite":
+                from huggingface_hub import snapshot_download
+                from pathlib import Path
+                granite_dir = config.granite_models_dir
+                granite_dir.mkdir(parents=True, exist_ok=True)
+                if not any(granite_dir.iterdir()):
+                    logger.info("Granite-модель не найдена — загружаем...")
+                    snapshot_download(
+                        repo_id="ibm-granite/granite-docling-258M",
+                        local_dir=granite_dir,
+                        cache_dir=str(granite_dir.parent / "huggingface_cache")
+                    )
+                    logger.info("Granite-модель успешно загружена в ./models/granite")
+        except Exception as e:
+            logger.warning(f"Не удалось загрузить Granite-модель: {e}")
+            
     except Exception as e:
         logger.exception(f"Error loading configuration: {e}")
         # Don't exit here, as we want the app to start even if config has issues

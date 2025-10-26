@@ -397,6 +397,13 @@ def update_docling_settings(form_data: dict, config: Config):
     config.docling_enable_page_images = form_data.get("docling_enable_page_images", False)
     config.docling_table_detection_advanced = form_data.get("docling_table_detection_advanced", False)
     config.docling_formula_detection_advanced = form_data.get("docling_formula_detection_advanced", False)
+    
+    # Обновление новых параметров Docling backend и device
+    if form_data.get("docling_backend") is not None:
+        config.docling_backend = form_data["docling_backend"]
+    
+    if form_data.get("docling_device") is not None:
+        config.docling_device = form_data["docling_device"]
 
 
 def update_advanced_settings(form_data: dict, config: Config):

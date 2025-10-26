@@ -1,24 +1,29 @@
 """Унифицированный конвертер документов на основе Docling с EasyOCR."""
 
 import logging
-import base64
 import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable
 
-from docling.document_converter import DocumentConverter
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import (
+    VlmPipelineOptions,
     PdfPipelineOptions,
     TableStructureOptions,
     EasyOcrOptions
 )
-from docling.document_converter import PdfFormatOption
-# Импорт для TableFormerMode (если используется; fallback на default)
+from docling.datamodel import vlm_model_specs  # Правильный импорт для Granite specs
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.pipeline.vlm_pipeline import VlmPipeline
+from docling.datamodel.accelerator_options import AcceleratorOptions, AcceleratorDevice
+
 try:
     from docling.datamodel.table_structure import TableFormerMode
+    TABLE_FORMER_MODE = TableFormerMode.ACCURATE
 except ImportError:
-    TableFormerMode = None  # Default будет ACCURATE
+    TABLE_FORMER_MODE = "accurate"  # Fallback
+
+import base64  # Moved down to avoid import issues if needed
 
 from config.config_manager import ConfigManager
 
@@ -37,47 +42,99 @@ class DoclingConverter:
 
     def _setup_model_paths(self):
         """Настройка режима оффлайн/онлайн для Docling."""
-        # Устанавливаем только переменную оффлайн режима, не создаем локальные директории
         config = self.config_manager.get()
+        backend = config.docling_backend
         auto_download = getattr(config, "auto_download_models", True)
         use_local_only = getattr(config, "use_local_only", True)
 
-        # ВАЖНО: Docling 2.55+ проверяет только этот флаг для скачивания моделей
-        if use_local_only and not auto_download:
-            os.environ["DOCLING_OFFLINE_MODE"] = "1"
-            logger.info("DOCLING_OFFLINE_MODE=1 (режим оффлайн)")
+        # Для Granite: env для HF-моделей (TRANSFORMERS)
+        if backend == "granite":
+            if use_local_only:
+                os.environ["TRANSFORMERS_OFFLINE"] = "1"
+                logger.info("TRANSFORMERS_OFFLINE=1 для Granite (локальный режим)")
+            else:
+                os.environ.pop("TRANSFORMERS_OFFLINE", None)
         else:
-            # Разрешаем скачивание - удаляем переменную окружения полностью
-            os.environ.pop("DOCLING_OFFLINE_MODE", None)
-            logger.info("DOCLING_OFFLINE_MODE снят (режим онлайн/скачивание разрешено)")
+            # Для classic: общий Docling оффлайн
+            if use_local_only and not auto_download:
+                os.environ["DOCLING_OFFLINE_MODE"] = "1"
+                logger.info("DOCLING_OFFLINE_MODE=1 (режим оффлайн)")
+            else:
+                os.environ.pop("DOCLING_OFFLINE_MODE", None)
+                logger.info("DOCLING_OFFLINE_MODE снят (режим онлайн/скачивание разрешено)")
 
         logger.info(f"DOCLING_OFFLINE_MODE={os.environ.get('DOCLING_OFFLINE_MODE', 'NOT SET')}")
+
+
+    def _get_accelerator(self, device_str: str) -> AcceleratorOptions:
+        """Get accelerator options based on device string."""
+        device_map = {
+            "cpu": AcceleratorDevice.CPU,
+            "gpu": AcceleratorDevice.CUDA,
+            "auto": AcceleratorDevice.AUTO,
+        }
+        device = device_map.get(device_str.lower(), AcceleratorDevice.AUTO)
+        return AcceleratorOptions(device=device)
 
 
 
     def _initialize_converter(self):
         """Инициализация конвертера Docling с настройками из конфигурации."""
-        # Убедимся, что оффлайн-режим снят при необходимости
-        auto_download = getattr(self.config, "auto_download_models", True)
-        orig_offline = os.environ.get("DOCLING_OFFLINE_MODE")
-        
-        if auto_download and orig_offline is not None:
-            os.environ.pop("DOCLING_OFFLINE_MODE", None)
-            logger.info(f"DOCLING_OFFLINE_MODE снят перед инициализацией (был {orig_offline})")
-        elif auto_download:
-            logger.info("DOCLING_OFFLINE_MODE уже не установлен")
+        config = self.config_manager.get()
+        backend = config.docling_backend
+        device_str = config.docling_device.lower()
+        accelerator = self._get_accelerator(device_str)
+
+        # Установка HF_HOME для кэша (избегаем deprecated TRANSFORMERS_CACHE)
+        cache_dir = config.huggingface_cache_path
+        os.environ["HF_HOME"] = str(cache_dir)
+
+        # Для Granite: путь к локальным моделям
+        if backend == "granite":
+            granite_dir = config.granite_models_dir
+            logger.info(f"Granite setup: device={device_str}, cache={cache_dir}, models={granite_dir}")
         else:
-            logger.info(f"DOCLING_OFFLINE_MODE оставлен как есть: {orig_offline}")
-        
-        try:
-            # Создаем основной конвертер с учетом текущих настроек окружения
-            self.converter = DocumentConverter()
-            logger.info("Главный Docling конвертер успешно инициализирован")
-        except Exception as e:
-            logger.error(f"Ошибка при инициализации конвертера: {e}")
-            raise
-        
-        logger.info("Docling конвертер инициализирован (использует стандартные пути)")
+            logger.info(f"Classic Docling setup: device={device_str}")
+
+        if backend == "granite":
+            # Granite uses VlmPipeline with TRANSFORMERS (for CPU/GPU)
+            vlm_options = VlmPipelineOptions(
+                vlm_model_specs=vlm_model_specs.GRANITEDOCLING_TRANSFORMERS,  # Правильная константа для CPU/GPU
+                accelerator_options=accelerator,
+                table_structure_options=TableStructureOptions(
+                    table_former_mode=TABLE_FORMER_MODE,
+                    ocr_options=EasyOcrOptions(lang=config.docling_ocr_lang),
+                ) if config.docling_use_ocr else None,
+                local_files_only=(os.environ.get("TRANSFORMERS_OFFLINE") == "1"),
+                enable_ocr=config.docling_use_ocr,
+                enable_tables=config.docling_use_tables,
+                enable_formulas=config.docling_use_formulas,
+            )
+            format_opts = {
+                InputFormat.PDF: PdfFormatOption(
+                    pipeline_cls=VlmPipeline,
+                    pipeline_options=vlm_options,
+                )
+            }
+            self.converter = DocumentConverter(format_options=format_opts)
+        else:
+            # Classic mode with OCR and other options
+            # Apply OCR and table options to classic pipeline
+            kwargs = {
+                "accelerator_options": accelerator,
+            }
+            
+            if config.docling_use_ocr:
+                kwargs["ocr_options"] = EasyOcrOptions(lang=config.docling_ocr_lang)
+            
+            if config.docling_use_tables:
+                kwargs["table_structure_options"] = TableStructureOptions(
+                    table_former_mode=TABLE_FORMER_MODE,
+                )
+            
+            pdf_opts = PdfPipelineOptions(**kwargs)
+            format_opts = {InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_opts)}
+            self.converter = DocumentConverter(format_options=format_opts)
     
     def convert_file(self, file_path: Path, output_dir: Path) -> List[Path]:
         """Конвертировать файл в Markdown.
@@ -86,102 +143,20 @@ class DoclingConverter:
             file_path: Путь к исходному файлу
             output_dir: Директория для сохранения результатов
             
-        Returns:
-            List[Path]: Список путей к созданным файлам
+            Returns: List[Path]
         """
         try:
             config = self.config_manager.get()
             
-            # Используем стандартные пути для моделей Docling
-            artifacts_path = None  # Не указываем специфический путь, пусть Docling использует стандартные
-            
-            # Опции для таблиц (если включено)
-            table_options = None
-            if hasattr(config, 'docling_use_tables') and config.docling_use_tables:
-                # Устанавливаем режим таблицы, используя правильное значение
-                table_mode = 'accurate'  # Значение по умолчанию
-                if hasattr(config, 'docling_table_mode'):
-                    if config.docling_table_mode.lower() in ['fast', 'accurate']:
-                        table_mode = config.docling_table_mode.lower()
-                
-                table_options = TableStructureOptions(
-                    do_cell_matching=True,  # Default: True (улучшает mapping к PDF cells)
-                    mode=table_mode  # Правильное строковое значение
-                )
-
-            # Опции для OCR с языком из конфигурации
-            ocr_options = None
-            if config.docling_use_ocr:
-                # Используем язык из конфигурации
-                ocr_lang = getattr(config, 'docling_ocr_lang', 'en')  # по умолчанию английский
-                # Для EasyOCR язык указывается как список
-                if isinstance(ocr_lang, str):
-                    ocr_lang_list = [ocr_lang]
-                else:
-                    ocr_lang_list = ocr_lang
-                
-                ocr_options = EasyOcrOptions(
-                    lang=ocr_lang_list,
-                    download_enabled=True  # Явно разрешить скачивание в EasyOCR
-                )
-
-            # Определяем, включать ли расширенное обнаружение таблиц
-            enable_table_detection = (
-                getattr(config, 'docling_use_tables', False) and 
-                getattr(config, 'docling_table_detection_advanced', True)
-            )
-            
-            # PDF опции (OCR по умолчанию, если EasyOCR доступен)
-            if artifacts_path:
-                pdf_pipeline = PdfPipelineOptions(
-                    artifacts_path=artifacts_path,
-                    enable_remote_services=config.auto_download_models,  # Разрешить скачивание, если auto_download=True
-                    do_table_structure=enable_table_detection,  # Управление расширенным обнаружением таблиц
-                    table_structure_options=table_options,
-                    do_ocr=config.docling_use_ocr,  # Включаем OCR если нужно
-                    ocr_options=ocr_options,  # Используем наши настройки OCR
-                    generate_page_images=getattr(config, 'docling_enable_page_images', True)  # Управление генерацией изображений страниц
-                )
-            else:
-                pdf_pipeline = PdfPipelineOptions(
-                    enable_remote_services=config.auto_download_models,  # Разрешить скачивание, если auto_download=True
-                    do_table_structure=enable_table_detection,  # Управление расширенным обнаружением таблиц
-                    table_structure_options=table_options,
-                    do_ocr=config.docling_use_ocr,  # Включаем OCR если нужно
-                    ocr_options=ocr_options,  # Используем наши настройки OCR
-                    generate_page_images=getattr(config, 'docling_enable_page_images', True)  # Управление генерацией изображений страниц
-                )
-
-            # format_options для PDF (остальные — default)
-            format_options = {
-                InputFormat.PDF: PdfFormatOption(  # Используем PdfFormatOption вместо прямого PdfPipelineOptions
-                    pipeline_options=pdf_pipeline
-                ),
-            }
-
             # Проверяем и устанавливаем режим оффлайн при необходимости
             auto_download = getattr(config, "auto_download_models", True)
-            if auto_download:
-                # Убедимся, что оффлайн режим не установлен
-                os.environ.pop("DOCLING_OFFLINE_MODE", None)
-                logger.info("DOCLING_OFFLINE_MODE снят для конвертации")
-            else:
-                # Установим оффлайн режим, если автозагрузка отключена
-                os.environ["DOCLING_OFFLINE_MODE"] = "1"
-                logger.info("DOCLING_OFFLINE_MODE=1 (режим оффлайн)")
+            # Offline mode handled in _setup_model_paths; refresh if config changed
+            self._setup_model_paths()
             
             try:
-                # Создание нового конвертера с опциями
-                temp_converter = DocumentConverter(
-                    format_options=format_options,
-                )
-                
-                # Конвертация документа (с лимитами для памяти)
-                result = temp_converter.convert(file_path)
+                # Используем основной конвертер, инициализированный в _initialize_converter
+                result = self.converter.convert(file_path)
             finally:
-                # Никогда не восстанавливаем DOCLING_OFFLINE_MODE в рамках этой операции, 
-                # т.к. он управляется на уровне _setup_model_paths
-                # Восстановление происходит при изменении конфигурации
                 pass
             
             # Формирование пути для выходного файла
@@ -292,7 +267,7 @@ class DoclingConverter:
     
     def reload_config(self):
         """Перезагрузить конфигурацию и переинициализировать конвертер."""
-        self.config = self.config_manager.get()
+        self.config = self.config_manager.reload()
         self._setup_model_paths()
         self._initialize_converter()
         logger.info("Конфигурация Docling конвертера перезагружена")

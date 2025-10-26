@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Import resource path resolver
 from config.resource_path import resource_path
+from core.models.config import MainConfig
 
 
 class Config(BaseSettings):
@@ -21,161 +22,878 @@ class Config(BaseSettings):
         extra="ignore"
     )
     
-    # Настройки индексации
-    folder_path: str = "./data_to_index"
-    collection_name: str = "final-dense-collection"
-    current_hf_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    hf_model_history: List[str] = Field(default=["sentence-transformers/all-MiniLM-L6-v2"])
-    chunk_size: int = 500
-    chunk_overlap: int = 100
+    # Вложенные конфигурации
+    main: MainConfig = Field(default_factory=MainConfig, description="Основная конфигурация")
     
-    # Новые параметры для чанкинга
-    chunking_strategy: str = "character"  # "character", "paragraph" или "sentence"
+    # Старые поля для обратной совместимости - свойства, которые ссылаются на вложенные настройки
+    @property
+    def folder_path(self) -> str:
+        return self.main.indexing.folder_path
     
-    # Параметры для чанкинга по абзацам
-    paragraphs_per_chunk: int = 3
-    paragraph_overlap: int = 1
+    @folder_path.setter
+    def folder_path(self, value: str) -> None:
+        self.main.indexing.folder_path = value
     
-    # Параметры для чанкинга по предложениям
-    sentences_per_chunk: int = 5
-    sentence_overlap: int = 1
+    @property
+    def collection_name(self) -> str:
+        return self.main.indexing.collection_name
     
-    # Параметры для многоуровневого чанкинга
-    use_multilevel_chunking: bool = False
+    @collection_name.setter
+    def collection_name(self, value: str) -> None:
+        self.main.indexing.collection_name = value
     
-    # Оптимизация для оценки моделей
-    enable_pre_chunking_optimization: bool = True  # Включить предварительный chunking при оценке множества моделей
+    @property
+    def current_hf_model(self) -> str:
+        return self.main.embedding.current_hf_model
     
-    # Параметры макро-чанкинга
-    multilevel_macro_strategy: str = "character"  # "character", "paragraph" или "sentence"
-    multilevel_macro_chunk_size: int = 10000
-    multilevel_macro_chunk_overlap: int = 1000
-    multilevel_macro_paragraphs_per_chunk: int = 5
-    multilevel_macro_paragraph_overlap: int = 1
-    multilevel_macro_sentences_per_chunk: int = 10
-    multilevel_macro_sentence_overlap: int = 1
+    @current_hf_model.setter
+    def current_hf_model(self, value: str) -> None:
+        self.main.embedding.current_hf_model = value
     
-    # Параметры микро-чанкинга
-    multilevel_micro_strategy: str = "character"  # "character", "paragraph" или "sentence"
-    multilevel_micro_chunk_size: int = 1000
-    multilevel_micro_chunk_overlap: int = 100
-    multilevel_micro_paragraphs_per_chunk: int = 3
-    multilevel_micro_paragraph_overlap: int = 1
-    multilevel_micro_sentences_per_chunk: int = 5
-    multilevel_micro_sentence_overlap: int = 1
+    @property
+    def hf_model_history(self) -> List[str]:
+        return self.main.embedding.hf_model_history
     
-    device: str = "auto"
+    @hf_model_history.setter
+    def hf_model_history(self, value: List[str]) -> None:
+        self.main.embedding.hf_model_history = value
     
-    # Новые отдельные режимы индексации
-    index_dense: bool = True
-    index_bm25: bool = False
-    index_hybrid: bool = False
-    embedding_batch_size: int = Field(default=32, ge=1)  # Минимум 1
-    indexing_batch_size: int = Field(default=50, ge=1)   # Минимум 1
-    force_recreate: bool = True
-    memory_threshold: int = 500 * 1024 * 1024  # 500MB по умолчанию
-    sparse_embedding: Optional[str] = "Qdrant/bm25"
-    is_indexed: bool = False  # Флаг, указывающий, была ли выполнена индексация
+    @property
+    def chunk_size(self) -> int:
+        return self.main.indexing.chunk_size
     
-    # Настройки Qdrant
-    qdrant_url: str = "http://localhost:6333"
+    @chunk_size.setter
+    def chunk_size(self, value: int) -> None:
+        self.main.indexing.chunk_size = value
     
-    # Настройки MinerU (временно сохраняем для обратной совместимости, будет удалено при переходе на Docling)
-    mineru_input_pdf_dir: str = "./pdfs_to_process"
-    mineru_output_md_dir: str = "./data_to_index"
-    mineru_enable_formula_parsing: bool = False
-    mineru_enable_table_parsing: bool = False
-    mineru_model_source: str = "huggingface"
-    mineru_models_dir: str = ""
-    mineru_backend: str = "pipeline"
-    mineru_method: str = "auto"
-    mineru_lang: str = "east_slavic"
-    mineru_sglang_url: str = ""
-    mineru_subprocess_timeout: int = 600  # Таймаут для subprocess вызова mineru в секундах
+    @property
+    def chunk_overlap(self) -> int:
+        return self.main.indexing.chunk_overlap
     
-    # Настройки Docling (заменяет все старые конвертеры)
-    docling_use_ocr: bool = True
-    docling_use_tables: bool = True
-    docling_use_formulas: bool = True
-    docling_model_backend: str = "huggingface"
-    docling_ocr_model: str = "easyocr"  # Для будущего расширения
-    docling_ocr_lang: str = "ru"  # "ru", "en", "kk" или "east_slavic"
-    docling_images_dir: str = "images"  # Поддиректория для изображений
-    docling_table_mode: str = "accurate"  # "fast" или "accurate" - режим обработки таблиц
-    docling_enable_page_images: bool = True  # Генерировать ли изображения страниц (ресурсоемко)
-    docling_table_detection_advanced: bool = True  # Расширенное обнаружение таблиц (ресурсоемко)
-    docling_formula_detection_advanced: bool = True  # Расширенное обнаружение формул (ресурсоемко)
+    @chunk_overlap.setter
+    def chunk_overlap(self, value: int) -> None:
+        self.main.indexing.chunk_overlap = value
     
-    # Настройки кэширования
-    config_cache_ttl: int = Field(default=60, ge=1)  # Минимум 1 секунда
-    qdrant_client_cache_ttl: int = Field(default=60, ge=1)  # Минимум 1 секунда
-    collections_cache_ttl: int = Field(default=60, ge=1)  # Минимум 1 секунда
+    @property
+    def chunking_strategy(self) -> str:
+        return self.main.indexing.chunking_strategy
     
-    # Настройки GGUF моделей
-    gguf_model_n_ctx: int = Field(default=4096, ge=1)  # Минимум 1
+    @chunking_strategy.setter
+    def chunking_strategy(self, value: str) -> None:
+        self.main.indexing.chunking_strategy = value
     
-    # Настройки поиска
-    search_default_k: int = Field(default=5, ge=1)  # Минимум 1 результат
-    use_hybrid: bool = False  # Использовать гибридный поиск (dense + sparse)
-    hybrid_alpha: float = Field(default=0.7, ge=0.0, le=1.0)  # Вес для dense в гибридном поиске
-
-    # Глобальные настройки поиска (перенесены из формы поиска)
-    search_default_collection: str = "final-dense-collection"
-    search_default_device: str = "cpu"
-    search_default_type: str = "dense"  # "dense", "sparse", "hybrid"
-    search_default_use_reranker: bool = True
+    @property
+    def paragraphs_per_chunk(self) -> int:
+        return self.main.indexing.paragraphs_per_chunk
     
-    # BM25 Native Sparse Configuration
-    use_bm25: bool = True  # Enable native BM25 via sparse vectors with IDF
-    sparse_vector_name: str = "bm25_text"  # Name of the sparse vector field
-    bm25_tokenizer: str = "word"  # Tokenizer type: word, whitespace, prefix
-    bm25_min_token_len: int = 2
+    @paragraphs_per_chunk.setter
+    def paragraphs_per_chunk(self, value: int) -> None:
+        self.main.indexing.paragraphs_per_chunk = value
     
-    # Настройки reranker
-    reranker_enabled: bool = False
-    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-    reranker_top_k: int = Field(default=5, ge=1)  # Минимум 1 результат
+    @property
+    def paragraph_overlap(self) -> int:
+        return self.main.indexing.paragraph_overlap
     
-    # Настройки подключения к Qdrant
-    qdrant_retry_attempts: int = Field(default=3, ge=1)  # Минимум 1 попытка
-    qdrant_retry_wait_time: int = Field(default=2, ge=1)  # Минимум 1 секунда
+    @paragraph_overlap.setter
+    def paragraph_overlap(self, value: int) -> None:
+        self.main.indexing.paragraph_overlap = value
     
-    # Настройки индексации документов
-    indexing_default_batch_size: int = Field(default=32, ge=1)  # Минимум 1
+    @property
+    def sentences_per_chunk(self) -> int:
+        return self.main.indexing.sentences_per_chunk
     
-    # Настройки метаданных
-    enable_metadata_extraction: bool = True
-    metadata_custom_fields: Dict[str, Any] = Field(default={})
-    metadata_extract_pdf: bool = True
-    metadata_extract_image: bool = True
-    metadata_extract_docx: bool = True
+    @sentences_per_chunk.setter
+    def sentences_per_chunk(self, value: int) -> None:
+        self.main.indexing.sentences_per_chunk = value
     
-    # Путь к файлу конфигурации (для совместимости)
-    config_file_path: str = str(resource_path("config/config.json"))
+    @property
+    def sentence_overlap(self) -> int:
+        return self.main.indexing.sentence_overlap
     
-    # Токен HuggingFace для приватных моделей
-    huggingface_token: Optional[str] = Field(default=None, exclude=True)
-
-    # Настройки RAG
-    rag_enabled: bool = False  # Включить RAG (Retrieval + Generation)
-    rag_model_path: str = "models/Qwen3-4B-Instruct-2507-Q8_0.gguf"  # Путь к GGUF-модели LLM (относительно корня проекта)
-    rag_system_prompt: str = "You are a helpful assistant. Use the following context to answer the user's question accurately."  # Системный промпт
-    rag_top_k: int = Field(default=3, ge=1, le=10)  # Количество топ-результатов для контекста (1-10)
-    rag_max_tokens: int = Field(default=512, ge=1)  # Максимум токенов в генерации
-    rag_temperature: float = Field(default=0.7, ge=0.0, le=1.0)  # Температура генерации
-    rag_context_size: int = Field(default=4096, ge=512)  # Размер контекста для модели
-    rag_gpu_layers: int = Field(default=-1, ge=-1)  # Количество слоев для GPU (-1 = все слои)
-    rag_threads: int = Field(default=4, ge=1)  # Количество потоков для генерации
-    rag_batch_size: int = Field(default=512, ge=1)  # Размер батча для обработки
-    rag_beam_size: int = Field(default=1, ge=1)  # Размер beam для генерации
+    @sentence_overlap.setter
+    def sentence_overlap(self, value: int) -> None:
+        self.main.indexing.sentence_overlap = value
     
-    # Настройки локальных моделей
-    local_models_path: Path = Path("./models")
-    huggingface_cache_path: Path = Path("./models/huggingface_cache")
-    easyocr_models_path: Path = Path("./models/easyocr")
-    fastembed_cache_path: Path = Path("./models/fastembed")
-    use_local_only: bool = True  # Флаг для строгого оффлайна
-    auto_download_models: bool = True  # Флаг автоматического скачивания моделей
+    @property
+    def use_multilevel_chunking(self) -> bool:
+        return self.main.indexing.use_multilevel_chunking
+    
+    @use_multilevel_chunking.setter
+    def use_multilevel_chunking(self, value: bool) -> None:
+        self.main.indexing.use_multilevel_chunking = value
+    
+    @property
+    def enable_pre_chunking_optimization(self) -> bool:
+        return True  # Временная заглушка, так как это не используется в новой структуре
+    
+    @enable_pre_chunking_optimization.setter
+    def enable_pre_chunking_optimization(self, value: bool) -> None:
+        # Временная заглушка, так как это не используется в новой структуре
+        pass
+    
+    @property
+    def multilevel_macro_strategy(self) -> str:
+        return self.main.multilevel_chunker.macro_strategy
+    
+    @multilevel_macro_strategy.setter
+    def multilevel_macro_strategy(self, value: str) -> None:
+        self.main.multilevel_chunker.macro_strategy = value
+    
+    @property
+    def multilevel_macro_chunk_size(self) -> int:
+        return self.main.multilevel_chunker.macro_chunk_size
+    
+    @multilevel_macro_chunk_size.setter
+    def multilevel_macro_chunk_size(self, value: int) -> None:
+        self.main.multilevel_chunker.macro_chunk_size = value
+    
+    @property
+    def multilevel_macro_chunk_overlap(self) -> int:
+        return self.main.multilevel_chunker.macro_chunk_overlap
+    
+    @multilevel_macro_chunk_overlap.setter
+    def multilevel_macro_chunk_overlap(self, value: int) -> None:
+        self.main.multilevel_chunker.macro_chunk_overlap = value
+    
+    @property
+    def multilevel_macro_paragraphs_per_chunk(self) -> int:
+        return self.main.multilevel_chunker.macro_paragraphs_per_chunk
+    
+    @multilevel_macro_paragraphs_per_chunk.setter
+    def multilevel_macro_paragraphs_per_chunk(self, value: int) -> None:
+        self.main.multilevel_chunker.macro_paragraphs_per_chunk = value
+    
+    @property
+    def multilevel_macro_paragraph_overlap(self) -> int:
+        return self.main.multilevel_chunker.macro_paragraph_overlap
+    
+    @multilevel_macro_paragraph_overlap.setter
+    def multilevel_macro_paragraph_overlap(self, value: int) -> None:
+        self.main.multilevel_chunker.macro_paragraph_overlap = value
+    
+    @property
+    def multilevel_macro_sentences_per_chunk(self) -> int:
+        return self.main.multilevel_chunker.macro_sentences_per_chunk
+    
+    @multilevel_macro_sentences_per_chunk.setter
+    def multilevel_macro_sentences_per_chunk(self, value: int) -> None:
+        self.main.multilevel_chunker.macro_sentences_per_chunk = value
+    
+    @property
+    def multilevel_macro_sentence_overlap(self) -> int:
+        return self.main.multilevel_chunker.macro_sentence_overlap
+    
+    @multilevel_macro_sentence_overlap.setter
+    def multilevel_macro_sentence_overlap(self, value: int) -> None:
+        self.main.multilevel_chunker.macro_sentence_overlap = value
+    
+    @property
+    def multilevel_micro_strategy(self) -> str:
+        return self.main.multilevel_chunker.micro_strategy
+    
+    @multilevel_micro_strategy.setter
+    def multilevel_micro_strategy(self, value: str) -> None:
+        self.main.multilevel_chunker.micro_strategy = value
+    
+    @property
+    def multilevel_micro_chunk_size(self) -> int:
+        return self.main.multilevel_chunker.micro_chunk_size
+    
+    @multilevel_micro_chunk_size.setter
+    def multilevel_micro_chunk_size(self, value: int) -> None:
+        self.main.multilevel_chunker.micro_chunk_size = value
+    
+    @property
+    def multilevel_micro_chunk_overlap(self) -> int:
+        return self.main.multilevel_chunker.micro_chunk_overlap
+    
+    @multilevel_micro_chunk_overlap.setter
+    def multilevel_micro_chunk_overlap(self, value: int) -> None:
+        self.main.multilevel_chunker.micro_chunk_overlap = value
+    
+    @property
+    def multilevel_micro_paragraphs_per_chunk(self) -> int:
+        return self.main.multilevel_chunker.micro_paragraphs_per_chunk
+    
+    @multilevel_micro_paragraphs_per_chunk.setter
+    def multilevel_micro_paragraphs_per_chunk(self, value: int) -> None:
+        self.main.multilevel_chunker.micro_paragraphs_per_chunk = value
+    
+    @property
+    def multilevel_micro_paragraph_overlap(self) -> int:
+        return self.main.multilevel_chunker.micro_paragraph_overlap
+    
+    @multilevel_micro_paragraph_overlap.setter
+    def multilevel_micro_paragraph_overlap(self, value: int) -> None:
+        self.main.multilevel_chunker.micro_paragraph_overlap = value
+    
+    @property
+    def multilevel_micro_sentences_per_chunk(self) -> int:
+        return self.main.multilevel_chunker.micro_sentences_per_chunk
+    
+    @multilevel_micro_sentences_per_chunk.setter
+    def multilevel_micro_sentences_per_chunk(self, value: int) -> None:
+        self.main.multilevel_chunker.micro_sentences_per_chunk = value
+    
+    @property
+    def multilevel_micro_sentence_overlap(self) -> int:
+        return self.main.multilevel_chunker.micro_sentence_overlap
+    
+    @multilevel_micro_sentence_overlap.setter
+    def multilevel_micro_sentence_overlap(self, value: int) -> None:
+        self.main.multilevel_chunker.micro_sentence_overlap = value
+    
+    @property
+    def device(self) -> str:
+        return self.main.embedding.device
+    
+    @device.setter
+    def device(self, value: str) -> None:
+        self.main.embedding.device = value
+    
+    @property
+    def index_dense(self) -> bool:
+        return self.main.indexing.index_dense
+    
+    @index_dense.setter
+    def index_dense(self, value: bool) -> None:
+        self.main.indexing.index_dense = value
+    
+    @property
+    def index_bm25(self) -> bool:
+        return self.main.indexing.index_bm25
+    
+    @index_bm25.setter
+    def index_bm25(self, value: bool) -> None:
+        self.main.indexing.index_bm25 = value
+    
+    @property
+    def index_hybrid(self) -> bool:
+        return self.main.indexing.index_hybrid
+    
+    @index_hybrid.setter
+    def index_hybrid(self, value: bool) -> None:
+        self.main.indexing.index_hybrid = value
+    
+    @property
+    def embedding_batch_size(self) -> int:
+        return self.main.embedding.batch_size
+    
+    @embedding_batch_size.setter
+    def embedding_batch_size(self, value: int) -> None:
+        self.main.embedding.batch_size = value
+    
+    @property
+    def indexing_batch_size(self) -> int:
+        return self.main.indexing.batch_size
+    
+    @indexing_batch_size.setter
+    def indexing_batch_size(self, value: int) -> None:
+        self.main.indexing.batch_size = value
+    
+    @property
+    def force_recreate(self) -> bool:
+        return self.main.indexing.force_recreate
+    
+    @force_recreate.setter
+    def force_recreate(self, value: bool) -> None:
+        self.main.indexing.force_recreate = value
+    
+    @property
+    def memory_threshold(self) -> int:
+        return self.main.indexing.memory_threshold
+    
+    @memory_threshold.setter
+    def memory_threshold(self, value: int) -> None:
+        self.main.indexing.memory_threshold = value
+    
+    @property
+    def sparse_embedding(self) -> Optional[str]:
+        return self.main.indexing.sparse_embedding
+    
+    @sparse_embedding.setter
+    def sparse_embedding(self, value: Optional[str]) -> None:
+        self.main.indexing.sparse_embedding = value
+    
+    @property
+    def is_indexed(self) -> bool:
+        return self.main.indexing.is_indexed
+    
+    @is_indexed.setter
+    def is_indexed(self, value: bool) -> None:
+        self.main.indexing.is_indexed = value
+    
+    @property
+    def qdrant_url(self) -> str:
+        return self.main.qdrant.url
+    
+    @qdrant_url.setter
+    def qdrant_url(self, value: str) -> None:
+        self.main.qdrant.url = value
+    
+    @property
+    def mineru_input_pdf_dir(self) -> str:
+        return self.main.mineru.input_pdf_dir
+    
+    @mineru_input_pdf_dir.setter
+    def mineru_input_pdf_dir(self, value: str) -> None:
+        self.main.mineru.input_pdf_dir = value
+    
+    @property
+    def mineru_output_md_dir(self) -> str:
+        return self.main.mineru.output_md_dir
+    
+    @mineru_output_md_dir.setter
+    def mineru_output_md_dir(self, value: str) -> None:
+        self.main.mineru.output_md_dir = value
+    
+    @property
+    def mineru_enable_formula_parsing(self) -> bool:
+        return self.main.mineru.enable_formula_parsing
+    
+    @mineru_enable_formula_parsing.setter
+    def mineru_enable_formula_parsing(self, value: bool) -> None:
+        self.main.mineru.enable_formula_parsing = value
+    
+    @property
+    def mineru_enable_table_parsing(self) -> bool:
+        return self.main.mineru.enable_table_parsing
+    
+    @mineru_enable_table_parsing.setter
+    def mineru_enable_table_parsing(self, value: bool) -> None:
+        self.main.mineru.enable_table_parsing = value
+    
+    @property
+    def mineru_model_source(self) -> str:
+        return self.main.mineru.model_source
+    
+    @mineru_model_source.setter
+    def mineru_model_source(self, value: str) -> None:
+        self.main.mineru.model_source = value
+    
+    @property
+    def mineru_models_dir(self) -> str:
+        return self.main.mineru.models_dir
+    
+    @mineru_models_dir.setter
+    def mineru_models_dir(self, value: str) -> None:
+        self.main.mineru.models_dir = value
+    
+    @property
+    def mineru_backend(self) -> str:
+        return self.main.mineru.backend
+    
+    @mineru_backend.setter
+    def mineru_backend(self, value: str) -> None:
+        self.main.mineru.backend = value
+    
+    @property
+    def mineru_method(self) -> str:
+        return self.main.mineru.method
+    
+    @mineru_method.setter
+    def mineru_method(self, value: str) -> None:
+        self.main.mineru.method = value
+    
+    @property
+    def mineru_lang(self) -> str:
+        return self.main.mineru.lang
+    
+    @mineru_lang.setter
+    def mineru_lang(self, value: str) -> None:
+        self.main.mineru.lang = value
+    
+    @property
+    def mineru_sglang_url(self) -> str:
+        return self.main.mineru.sglang_url
+    
+    @mineru_sglang_url.setter
+    def mineru_sglang_url(self, value: str) -> None:
+        self.main.mineru.sglang_url = value
+    
+    @property
+    def mineru_subprocess_timeout(self) -> int:
+        return self.main.mineru.subprocess_timeout
+    
+    @mineru_subprocess_timeout.setter
+    def mineru_subprocess_timeout(self, value: int) -> None:
+        self.main.mineru.subprocess_timeout = value
+    
+    @property
+    def docling_use_ocr(self) -> bool:
+        return self.main.docling.use_ocr
+    
+    @docling_use_ocr.setter
+    def docling_use_ocr(self, value: bool) -> None:
+        self.main.docling.use_ocr = value
+    
+    @property
+    def docling_use_tables(self) -> bool:
+        return self.main.docling.use_tables
+    
+    @docling_use_tables.setter
+    def docling_use_tables(self, value: bool) -> None:
+        self.main.docling.use_tables = value
+    
+    @property
+    def docling_use_formulas(self) -> bool:
+        return self.main.docling.use_formulas
+    
+    @docling_use_formulas.setter
+    def docling_use_formulas(self, value: bool) -> None:
+        self.main.docling.use_formulas = value
+    
+    @property
+    def docling_model_backend(self) -> str:
+        return self.main.docling.model_backend
+    
+    @docling_model_backend.setter
+    def docling_model_backend(self, value: str) -> None:
+        self.main.docling.model_backend = value
+    
+    @property
+    def docling_ocr_model(self) -> str:
+        return self.main.docling.ocr_model
+    
+    @docling_ocr_model.setter
+    def docling_ocr_model(self, value: str) -> None:
+        self.main.docling.ocr_model = value
+    
+    @property
+    def docling_ocr_lang(self) -> str:
+        return self.main.docling.ocr_lang
+    
+    @docling_ocr_lang.setter
+    def docling_ocr_lang(self, value: str) -> None:
+        self.main.docling.ocr_lang = value
+    
+    @property
+    def docling_images_dir(self) -> str:
+        return self.main.docling.images_dir
+    
+    @docling_images_dir.setter
+    def docling_images_dir(self, value: str) -> None:
+        self.main.docling.images_dir = value
+    
+    @property
+    def docling_table_mode(self) -> str:
+        return self.main.docling.table_mode
+    
+    @docling_table_mode.setter
+    def docling_table_mode(self, value: str) -> None:
+        self.main.docling.table_mode = value
+    
+    @property
+    def docling_enable_page_images(self) -> bool:
+        return self.main.docling.enable_page_images
+    
+    @docling_enable_page_images.setter
+    def docling_enable_page_images(self, value: bool) -> None:
+        self.main.docling.enable_page_images = value
+    
+    @property
+    def docling_table_detection_advanced(self) -> bool:
+        return self.main.docling.table_detection_advanced
+    
+    @docling_table_detection_advanced.setter
+    def docling_table_detection_advanced(self, value: bool) -> None:
+        self.main.docling.table_detection_advanced = value
+    
+    @property
+    def docling_formula_detection_advanced(self) -> bool:
+        return self.main.docling.formula_detection_advanced
+    
+    @docling_formula_detection_advanced.setter
+    def docling_formula_detection_advanced(self, value: bool) -> None:
+        self.main.docling.formula_detection_advanced = value
+    
+    @property
+    def docling_backend(self) -> str:
+        return self.main.docling.backend
+    
+    @docling_backend.setter
+    def docling_backend(self, value: str) -> None:
+        self.main.docling.backend = value
+    
+    @property
+    def docling_device(self) -> str:
+        return self.main.docling.device
+    
+    @docling_device.setter
+    def docling_device(self, value: str) -> None:
+        self.main.docling.device = value
+    
+    @property
+    def docling_granite_models_dir(self) -> Path:
+        return self.main.docling.granite_models_dir
+    
+    @docling_granite_models_dir.setter
+    def docling_granite_models_dir(self, value: Path) -> None:
+        self.main.docling.granite_models_dir = value
+    
+    @property
+    def granite_models_dir(self) -> Path:
+        return self.main.docling.granite_models_dir
+    
+    @granite_models_dir.setter
+    def granite_models_dir(self, value: Path) -> None:
+        self.main.docling.granite_models_dir = value
+    
+    @property
+    def config_cache_ttl(self) -> int:
+        return self.main.cache.config_cache_ttl
+    
+    @config_cache_ttl.setter
+    def config_cache_ttl(self, value: int) -> None:
+        self.main.cache.config_cache_ttl = value
+    
+    @property
+    def qdrant_client_cache_ttl(self) -> int:
+        return self.main.cache.qdrant_client_cache_ttl
+    
+    @qdrant_client_cache_ttl.setter
+    def qdrant_client_cache_ttl(self, value: int) -> None:
+        self.main.cache.qdrant_client_cache_ttl = value
+    
+    @property
+    def collections_cache_ttl(self) -> int:
+        return self.main.cache.collections_cache_ttl
+    
+    @collections_cache_ttl.setter
+    def collections_cache_ttl(self, value: int) -> None:
+        self.main.cache.collections_cache_ttl = value
+    
+    @property
+    def gguf_model_n_ctx(self) -> int:
+        return self.main.embedding.gguf.model_n_ctx
+    
+    @gguf_model_n_ctx.setter
+    def gguf_model_n_ctx(self, value: int) -> None:
+        self.main.embedding.gguf.model_n_ctx = value
+    
+    @property
+    def search_default_k(self) -> int:
+        return self.main.search.default_k
+    
+    @search_default_k.setter
+    def search_default_k(self, value: int) -> None:
+        self.main.search.default_k = value
+    
+    @property
+    def use_hybrid(self) -> bool:
+        return self.main.search.use_hybrid
+    
+    @use_hybrid.setter
+    def use_hybrid(self, value: bool) -> None:
+        self.main.search.use_hybrid = value
+    
+    @property
+    def hybrid_alpha(self) -> float:
+        return self.main.search.hybrid_alpha
+    
+    @hybrid_alpha.setter
+    def hybrid_alpha(self, value: float) -> None:
+        self.main.search.hybrid_alpha = value
+    
+    @property
+    def search_default_collection(self) -> str:
+        return self.main.search.default_collection
+    
+    @search_default_collection.setter
+    def search_default_collection(self, value: str) -> None:
+        self.main.search.default_collection = value
+    
+    @property
+    def search_default_device(self) -> str:
+        return self.main.search.default_device
+    
+    @search_default_device.setter
+    def search_default_device(self, value: str) -> None:
+        self.main.search.default_device = value
+    
+    @property
+    def search_default_type(self) -> str:
+        return self.main.search.default_type
+    
+    @search_default_type.setter
+    def search_default_type(self, value: str) -> None:
+        self.main.search.default_type = value
+    
+    @property
+    def search_default_use_reranker(self) -> bool:
+        return self.main.search.default_use_reranker
+    
+    @search_default_use_reranker.setter
+    def search_default_use_reranker(self, value: bool) -> None:
+        self.main.search.default_use_reranker = value
+    
+    @property
+    def use_bm25(self) -> bool:
+        return self.main.bm25.enabled
+    
+    @use_bm25.setter
+    def use_bm25(self, value: bool) -> None:
+        self.main.bm25.enabled = value
+    
+    @property
+    def sparse_vector_name(self) -> str:
+        return self.main.bm25.sparse_vector_name
+    
+    @sparse_vector_name.setter
+    def sparse_vector_name(self, value: str) -> None:
+        self.main.bm25.sparse_vector_name = value
+    
+    @property
+    def bm25_tokenizer(self) -> str:
+        return self.main.bm25.tokenizer
+    
+    @bm25_tokenizer.setter
+    def bm25_tokenizer(self, value: str) -> None:
+        self.main.bm25.tokenizer = value
+    
+    @property
+    def bm25_min_token_len(self) -> int:
+        return self.main.bm25.min_token_len
+    
+    @bm25_min_token_len.setter
+    def bm25_min_token_len(self, value: int) -> None:
+        self.main.bm25.min_token_len = value
+    
+    @property
+    def reranker_enabled(self) -> bool:
+        return self.main.reranker.enabled
+    
+    @reranker_enabled.setter
+    def reranker_enabled(self, value: bool) -> None:
+        self.main.reranker.enabled = value
+    
+    @property
+    def reranker_model(self) -> str:
+        return self.main.reranker.model
+    
+    @reranker_model.setter
+    def reranker_model(self, value: str) -> None:
+        self.main.reranker.model = value
+    
+    @property
+    def reranker_top_k(self) -> int:
+        return self.main.reranker.top_k
+    
+    @reranker_top_k.setter
+    def reranker_top_k(self, value: int) -> None:
+        self.main.reranker.top_k = value
+    
+    @property
+    def qdrant_retry_attempts(self) -> int:
+        return self.main.qdrant.retry_attempts
+    
+    @qdrant_retry_attempts.setter
+    def qdrant_retry_attempts(self, value: int) -> None:
+        self.main.qdrant.retry_attempts = value
+    
+    @property
+    def qdrant_retry_wait_time(self) -> int:
+        return self.main.qdrant.retry_wait_time
+    
+    @qdrant_retry_wait_time.setter
+    def qdrant_retry_wait_time(self, value: int) -> None:
+        self.main.qdrant.retry_wait_time = value
+    
+    @property
+    def indexing_default_batch_size(self) -> int:
+        return self.main.indexing.batch_size  # Используем то же поле
+    
+    @indexing_default_batch_size.setter
+    def indexing_default_batch_size(self, value: int) -> None:
+        self.main.indexing.batch_size = value
+    
+    @property
+    def enable_metadata_extraction(self) -> bool:
+        return self.main.metadata.enable_extraction
+    
+    @enable_metadata_extraction.setter
+    def enable_metadata_extraction(self, value: bool) -> None:
+        self.main.metadata.enable_extraction = value
+    
+    @property
+    def metadata_custom_fields(self) -> Dict[str, Any]:
+        return self.main.metadata.custom_fields
+    
+    @metadata_custom_fields.setter
+    def metadata_custom_fields(self, value: Dict[str, Any]) -> None:
+        self.main.metadata.custom_fields = value
+    
+    @property
+    def metadata_extract_pdf(self) -> bool:
+        return self.main.metadata.extract_pdf
+    
+    @metadata_extract_pdf.setter
+    def metadata_extract_pdf(self, value: bool) -> None:
+        self.main.metadata.extract_pdf = value
+    
+    @property
+    def metadata_extract_image(self) -> bool:
+        return self.main.metadata.extract_image
+    
+    @metadata_extract_image.setter
+    def metadata_extract_image(self, value: bool) -> None:
+        self.main.metadata.extract_image = value
+    
+    @property
+    def metadata_extract_docx(self) -> bool:
+        return self.main.metadata.extract_docx
+    
+    @metadata_extract_docx.setter
+    def metadata_extract_docx(self, value: bool) -> None:
+        self.main.metadata.extract_docx = value
+    
+    @property
+    def config_file_path(self) -> str:
+        return str(resource_path("config/config.json"))
+    
+    @property
+    def huggingface_token(self) -> Optional[str]:
+        return getattr(self, '_huggingface_token', None)  # Временная заглушка
+    
+    @huggingface_token.setter
+    def huggingface_token(self, value: Optional[str]) -> None:
+        self._huggingface_token = value
+    
+    @property
+    def rag_enabled(self) -> bool:
+        return self.main.rag.enabled
+    
+    @rag_enabled.setter
+    def rag_enabled(self, value: bool) -> None:
+        self.main.rag.enabled = value
+    
+    @property
+    def rag_model_path(self) -> str:
+        return self.main.rag.model_path
+    
+    @rag_model_path.setter
+    def rag_model_path(self, value: str) -> None:
+        self.main.rag.model_path = value
+    
+    @property
+    def rag_system_prompt(self) -> str:
+        return self.main.rag.system_prompt
+    
+    @rag_system_prompt.setter
+    def rag_system_prompt(self, value: str) -> None:
+        self.main.rag.system_prompt = value
+    
+    @property
+    def rag_top_k(self) -> int:
+        return self.main.rag.top_k
+    
+    @rag_top_k.setter
+    def rag_top_k(self, value: int) -> None:
+        self.main.rag.top_k = value
+    
+    @property
+    def rag_max_tokens(self) -> int:
+        return self.main.rag.max_tokens
+    
+    @rag_max_tokens.setter
+    def rag_max_tokens(self, value: int) -> None:
+        self.main.rag.max_tokens = value
+    
+    @property
+    def rag_temperature(self) -> float:
+        return self.main.rag.temperature
+    
+    @rag_temperature.setter
+    def rag_temperature(self, value: float) -> None:
+        self.main.rag.temperature = value
+    
+    @property
+    def rag_context_size(self) -> int:
+        return self.main.rag.context_size
+    
+    @rag_context_size.setter
+    def rag_context_size(self, value: int) -> None:
+        self.main.rag.context_size = value
+    
+    @property
+    def rag_gpu_layers(self) -> int:
+        return self.main.rag.gpu_layers
+    
+    @rag_gpu_layers.setter
+    def rag_gpu_layers(self, value: int) -> None:
+        self.main.rag.gpu_layers = value
+    
+    @property
+    def rag_threads(self) -> int:
+        return self.main.rag.threads
+    
+    @rag_threads.setter
+    def rag_threads(self, value: int) -> None:
+        self.main.rag.threads = value
+    
+    @property
+    def rag_batch_size(self) -> int:
+        return self.main.rag.batch_size
+    
+    @rag_batch_size.setter
+    def rag_batch_size(self, value: int) -> None:
+        self.main.rag.batch_size = value
+    
+    @property
+    def rag_beam_size(self) -> int:
+        return self.main.rag.beam_size
+    
+    @rag_beam_size.setter
+    def rag_beam_size(self, value: int) -> None:
+        self.main.rag.beam_size = value
+    
+    @property
+    def local_models_path(self) -> Path:
+        return self.main.model_paths.local_models_path
+    
+    @local_models_path.setter
+    def local_models_path(self, value: Path) -> None:
+        self.main.model_paths.local_models_path = value
+    
+    @property
+    def huggingface_cache_path(self) -> Path:
+        return self.main.model_paths.huggingface_cache_path
+    
+    @huggingface_cache_path.setter
+    def huggingface_cache_path(self, value: Path) -> None:
+        self.main.model_paths.huggingface_cache_path = value
+    
+    @property
+    def easyocr_models_path(self) -> Path:
+        return self.main.model_paths.easyocr_models_path
+    
+    @easyocr_models_path.setter
+    def easyocr_models_path(self, value: Path) -> None:
+        self.main.model_paths.easyocr_models_path = value
+    
+    @property
+    def fastembed_cache_path(self) -> Path:
+        return self.main.model_paths.fastembed_cache_path
+    
+    @fastembed_cache_path.setter
+    def fastembed_cache_path(self, value: Path) -> None:
+        self.main.model_paths.fastembed_cache_path = value
+    
+    @property
+    def use_local_only(self) -> bool:
+        return self.main.model_paths.use_local_only
+    
+    @use_local_only.setter
+    def use_local_only(self, value: bool) -> None:
+        self.main.model_paths.use_local_only = value
+    
+    @property
+    def auto_download_models(self) -> bool:
+        return self.main.model_paths.auto_download_models
+    
+    @auto_download_models.setter
+    def auto_download_models(self, value: bool) -> None:
+        self.main.model_paths.auto_download_models = value
 
     def save_to_file(self, file_path: Optional[str] = None) -> None:
         """Сохранить конфигурацию в JSON файл.
@@ -188,7 +906,8 @@ class Config(BaseSettings):
         if file_path is None:
             file_path = self.config_file_path
             
-        config_dict = self.model_dump()
+        # Используем вложенные данные из main для сериализации
+        config_dict = self.main.model_dump()
         
         # Преобразуем объекты Path в строки для сериализации в JSON
         def convert_path_to_str(obj):

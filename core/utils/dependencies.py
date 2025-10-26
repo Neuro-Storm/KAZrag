@@ -40,7 +40,9 @@ def get_client(config: Config = Depends(get_config)):
             _last_connection_check = current_time
             logger.debug("Проверка соединения с Qdrant выполнена")
         except Exception as e:
-            logger.exception(f"Ошибка при проверке соединения с Qdrant: {e}")
+            logger.error(f"Ошибка при проверке соединения с Qdrant: {e}")
+            logger.info(f"Убедитесь, что сервер Qdrant запущен и доступен по адресу {config.qdrant_url}")
+            logger.info(f"Проверьте, что Qdrant запущен командой: docker run -p 6333:6333 -p 6334:6334 -v ./qdrant_data:/qdrant/storage:z qdrant/qdrant")
             raise
     else:
         logger.debug("Проверка соединения с Qdrant пропущена (кэш)")

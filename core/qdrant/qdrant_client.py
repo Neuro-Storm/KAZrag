@@ -36,7 +36,7 @@ def _create_client(
     config_manager.get()
     
     # Use provided timeout or default from config
-    client_timeout = timeout if timeout is not None else 10
+    client_timeout = timeout if timeout is not None else 30  # Increased default timeout from 10 to 30 seconds
     
     return QdrantClient(
         url=url,
@@ -64,7 +64,9 @@ def get_qdrant_client(
         config = config_manager.get()
     
     # Use provided timeout or get from config
-    client_timeout = timeout if timeout is not None else config.qdrant_retry_wait_time
+    # Using retry_wait_time was incorrect - it's for retry delays, not connection timeout
+    # Use a default of 30 seconds if no timeout is provided
+    client_timeout = timeout if timeout is not None else 30  # Default to 30 seconds
     
     return _create_client(
         url=config.qdrant_url,
@@ -94,7 +96,9 @@ async def aget_qdrant_client(
         config = config_manager.get()
     
     # Use provided timeout or get from config
-    client_timeout = timeout if timeout is not None else config.qdrant_retry_wait_time
+    # Using retry_wait_time was incorrect - it's for retry delays, not connection timeout
+    # Use a default of 30 seconds if no timeout is provided
+    client_timeout = timeout if timeout is not None else 30  # Default to 30 seconds
     
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(

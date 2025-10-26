@@ -3,10 +3,12 @@
 import os
 import sys
 import unittest  # Явный импорт для PyInstaller
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
 from dotenv import load_dotenv
+from fastapi import FastAPI
 
 # Устанавливаем переменные окружения для кэша моделей
 models_dir = Path("./models")
@@ -15,13 +17,12 @@ os.makedirs(models_dir / "huggingface_cache", exist_ok=True)
 os.makedirs(models_dir / "easyocr", exist_ok=True)
 os.makedirs(models_dir / "fastembed", exist_ok=True)
 
-os.environ["TRANSFORMERS_CACHE"] = str(models_dir / "huggingface_cache")
+
 os.environ["HF_HOME"] = str(models_dir / "huggingface_cache")
 os.environ["FASTEMBED_CACHE_DIR"] = str(models_dir / "fastembed")
 os.environ["TOKENIZERS_PARALLELISM"] = "false"  # Стабильность
 
 # Импорт модулей для настройки приложения
-from app.app_factory import create_app
 from app.startup import startup_event_handler
 from config.logging_config import setup_logging, get_logger, setup_intercept_handler
 
@@ -38,18 +39,27 @@ hf_token = os.getenv("HUGGINGFACE_TOKEN")
 if hf_token:
     os.environ["HF_TOKEN"] = hf_token
 
-# Создание основного приложения FastAPI через фабрику
-app = create_app()
 
-
-
-
-
-# Регистрация обработчиков событий запуска и остановки
-@app.on_event("startup")
-async def startup_event():
-    """Handle application startup event."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Handle application startup and shutdown events."""
+    logger.info("Приложение запускается")
     startup_event_handler()
+    yield
+    logger.info("Приложение останавливается")
+
+
+def create_app_with_lifespan() -> FastAPI:
+    """Create and configure the FastAPI application with lifespan."""
+    from app.app_factory import create_app
+    app = create_app()
+    app.router.lifespan_context = lifespan
+    return app
+
+
+# Создание основного приложения FastAPI через фабрику
+app = create_app_with_lifespan()
+
 
 if __name__ == "__main__":
     logger.info("Начало запуска приложения")
@@ -67,15 +77,9 @@ if __name__ == "__main__":
         sys.exit(1)
     # Создание основного приложения FastAPI через фабрику
     logger.info("Создание приложения")
-    app = create_app()
+    app = create_app_with_lifespan()
     logger.info("Приложение успешно создано")
-    # Регистрация обработчиков событий запуска и остановки
-    logger.info("Регистрация обработчиков событий")
-    @app.on_event("startup")
-    async def startup_event():
-        """Handle application startup event."""
-        startup_event_handler()
-    logger.info("Обработчики событий зарегистрированы")
+    logger.info("Обработчики событий зарегистрированы через lifespan")
     # Запуск сервера
     try:
         logger.info("Запуск сервера на http://127.0.0.1:8000")

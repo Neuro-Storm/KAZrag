@@ -22,6 +22,7 @@ from core.indexing.multilevel_chunker import (
 )
 from core.qdrant.qdrant_client import get_qdrant_client
 from core.utils.constants import DEFAULT_COLLECTION_NAME
+from .indexing_models import IndexingParams, MultiLevelChunkData
 
 # Импортируем SparseEmbeddingAdapter
 try:

@@ -7,9 +7,11 @@ from pathlib import Path
 
 from cachetools import TTLCache
 from pydantic import ValidationError
+from pydantic_core import from_json
 
 from config.settings import Config
 from config.resource_path import resource_path
+from core.models.config import MainConfig
 
 logger = logging.getLogger(__name__)
 
@@ -63,8 +65,11 @@ class ConfigManager:
             with open(config_file, encoding="utf-8") as f:
                 config_dict = json.load(f)
                 
-            # Создать объект Config с валидацией
-            config = Config(**config_dict)
+            # Создать объект MainConfig из старого словаря, а затем Config
+            # Это позволяет обрабатывать старые форматы JSON с плоской структурой
+            main_config = MainConfig.model_validate(config_dict)
+            config = Config()
+            config.main = main_config
             return config
             
         except ValidationError as e:
@@ -169,15 +174,20 @@ class ConfigManager:
             Config: Обновленный объект конфигурации
         """
         try:
-            # Получить текущую конфигурацию
+            # Создать новый экземпляр MainConfig из обновлений
+            # Используем существующую конфигурацию как базу, а затем применяем обновления
             current_config = self.get()
             
-            # Преобразовать в словарь и обновить
-            config_dict = current_config.model_dump()
-            config_dict.update(updates)
+            # Получить словарь текущих значений и обновить его
+            main_config_dict = current_config.main.model_dump()
+            main_config_dict.update(updates)
             
-            # Создать новый объект конфигурации
-            updated_config = Config(**config_dict)
+            # Создать новый экземпляр MainConfig с обновленными значениями
+            updated_main_config = MainConfig.model_validate(main_config_dict)
+            
+            # Создать новую конфигурацию с обновленной основной конфигурацией
+            updated_config = Config()
+            updated_config.main = updated_main_config
             
             # Сохранить обновленную конфигурацию
             self.save(updated_config)

@@ -473,6 +473,25 @@
                         <label for="docling_formula_detection_advanced">Расширенное обнаружение формул (ресурсоемко)</label>
                     </div>
                     
+                    <h3>Docling</h3>
+                    <div class="grid-2col">
+                        <div>
+                            <label for="docling_backend">Backend:</label>
+                            <select id="docling_backend" name="docling_backend" required>
+                              <option value="classic" {% if config.docling_backend == 'classic' %}selected{% endif %}>Classic</option>
+                              <option value="granite" {% if config.docling_backend == 'granite' %}selected{% endif %}>Granite</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label for="docling_device">Device:</label>
+                            <select id="docling_device" name="docling_device" required>
+                              <option value="auto" {% if config.docling_device == 'auto' %}selected{% endif %}>Auto</option>
+                              <option value="cpu" {% if config.docling_device == 'cpu' %}selected{% endif %}>CPU</option>
+                              <option value="gpu" {% if config.docling_device == 'gpu' %}selected{% endif %}>GPU</option>
+                            </select>
+                        </div>
+                    </div>
+                    
                     <button type="submit" class="btn btn-primary" :disabled="isProcessing">Сохранить настройки Docling</button>
                     <div class="progress" x-show="isProcessing">
                         <span class="spinner"></span> Сохранение настроек Docling...

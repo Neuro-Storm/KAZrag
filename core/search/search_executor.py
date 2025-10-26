@@ -10,6 +10,7 @@ from qdrant_client.models import SparseVector, Fusion, FusionQuery, Prefetch
 
 from config.config_manager import ConfigManager
 from core.embedding.embeddings import get_dense_embedder, get_search_device
+from .search_models import SearchQuery, SearchResult
 
 logger = logging.getLogger(__name__)
 
@@ -354,9 +355,35 @@ class SearchExecutor:
             Tuple[List[Tuple[Any, float]], Optional[str]]: (результаты поиска, ошибка)
         """
         try:
+            # Валидация параметров
+            if not query or not query.strip():
+                return [], "Запрос не может быть пустым"
+            
+            if not isinstance(k, int) or k < 1 or k > 100:
+                return [], f"Неверное количество результатов: {k}. Должно быть от 1 до 100"
+                
+            if search_mode not in ["dense", "sparse", "hybrid"]:
+                return [], f"Неверный режим поиска: {search_mode}. Допустимые значения: dense, sparse, hybrid"
+            
+            # Проверяем, что client поддерживает нужные методы
+            if not hasattr(client, 'search'):
+                return [], "Клиент Qdrant не поддерживает метод search"
+                
             config = ConfigManager.get_instance().get()
             if collection_name is None:
                 collection_name = config.collection_name
+            
+            # Валидация collection_name
+            if not collection_name or not collection_name.strip():
+                return [], "Название коллекции не может быть пустым"
+                
+            # Валидация metadata_filter
+            if metadata_filter:
+                try:
+                    SearchFilter = __import__('core.search.search_models', fromlist=['SearchFilter']).SearchFilter
+                    SearchFilter(metadata_filter=metadata_filter)
+                except Exception as validation_error:
+                    return [], f"Неверный формат фильтра: {str(validation_error)}"
             
             # Создаем фильтр, если нужно
             search_filter = SearchExecutor._create_filter(metadata_filter) if metadata_filter else None
@@ -473,11 +500,11 @@ class SearchExecutor:
                 metadata = payload.get('metadata', {})
                 
                 # Создаем расширенный объект результата
-                extended_result = {
-                    'content': content if content is not None else '',
-                    'metadata': metadata,
-                    'original_score': point.score if hasattr(point, 'score') else 0  # Сохраняем оригинальную оценку
-                }
+                extended_result = SearchResult(
+                    content=content if content is not None else '',
+                    metadata=metadata,
+                    original_score=point.score if hasattr(point, 'score') else 0  # Сохраняем оригинальную оценку
+                ).model_dump()
                 
                 # Если это многоуровневый чанк, добавляем информацию о микро-чанках
                 if 'micro_contents' in metadata:
