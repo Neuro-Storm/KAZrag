@@ -458,6 +458,12 @@
                         <input type="text" id="docling_images_dir" name="docling_images_dir" value="{{ config.docling_images_dir }}">
                     </div>
                     
+                    <div class="form-group">
+                        <label for="max_file_size_mb">Максимальный размер файла для обработки (МБ)</label>
+                        <input type="number" id="max_file_size_mb" name="max_file_size_mb" value="{{ config.max_file_size_mb }}" min="1" max="1000" required>
+                        <p class="help-text">Максимальный размер файла в мегабайтах, который будет обрабатываться. Файлы большего размера будут пропускаться.</p>
+                    </div>
+                    
                     <div class="form-group checkbox-group">
                         <input type="checkbox" id="docling_enable_page_images" name="docling_enable_page_images" value="True" {% if config.docling_enable_page_images %}checked{% endif %}>
                         <label for="docling_enable_page_images">Генерировать изображения страниц (ресурсоемко)</label>

@@ -68,23 +68,24 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
                 sparse_emb = SparseEmbeddingAdapter(config)  # Используем полный config объект
                 logger.info(f"Sparse embedding adapter initialized: {config.sparse_embedding}")
                 
-                # Debug sample doc sparse
+                # Debug sample doc sparse (only if detailed logging is required)
                 try:
-                    sample_points = client.scroll(
-                        collection_name=collection_name,
-                        limit=1,
-                        with_vectors=True
-                    )
-                    if sample_points and len(sample_points[0]) > 0:
-                        sample_point = sample_points[0][0]  # First point
-                        if hasattr(sample_point, 'vectors') and sample_point.vectors:
-                            sparse_vec_sample = sample_point.vectors.get(config.sparse_vector_name)
-                            if sparse_vec_sample:
-                                logger.info(f"Sample doc sparse: indices={sparse_vec_sample.indices[:5]}..., non-zero={sum(1 for v in sparse_vec_sample.values if v > 0)}")
+                    if logger.isEnabledFor(logging.DEBUG):
+                        sample_points = client.scroll(
+                            collection_name=collection_name,
+                            limit=1,
+                            with_vectors=True
+                        )
+                        if sample_points and len(sample_points[0]) > 0:
+                            sample_point = sample_points[0][0]  # First point
+                            if hasattr(sample_point, 'vectors') and sample_point.vectors:
+                                sparse_vec_sample = sample_point.vectors.get(config.sparse_vector_name)
+                                if sparse_vec_sample:
+                                    logger.debug(f"Sample doc sparse: indices={sparse_vec_sample.indices[:5]}..., non-zero={sum(1 for v in sparse_vec_sample.values if v > 0)}")
                             else:
-                                logger.warning("No sparse vector in sample point")
+                                logger.debug("No sparse vector in sample point")
                         else:
-                            logger.warning("No vectors in sample point")
+                            logger.debug("No vectors in sample point")
                 except Exception as scroll_error:
                     logger.error(f"Debug scroll error: {scroll_error}")
             except ImportError:
@@ -145,16 +146,16 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         
         logger.info(f"SearchExecutor returned: {len(results) if results else 0} results, error: {error}")
         
-        # Debug logging to check results from SearchExecutor
-        if results:
-            logger.info(f"Results from SearchExecutor: {len(results)} items")
+        # Debug logging to check results from SearchExecutor (only if detailed logging is required)
+        if results and logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Results from SearchExecutor: {len(results)} items")
             for i, (result, score) in enumerate(results[:3]):  # Log first 3 results
-                logger.info(f"  Result {i}: score={score}, type={type(result)}, content_len={len(result.get('content', '')) if isinstance(result, dict) else 'N/A'}, source={result.get('source', 'N/A') if isinstance(result, dict) else 'N/A'}")
+                logger.debug(f"  Result {i}: score={score}, type={type(result)}, content_len={len(result.get('content', '')) if isinstance(result, dict) else 'N/A'}, source={result.get('source', 'N/A') if isinstance(result, dict) else 'N/A'}")
                 if isinstance(result, dict):
-                    logger.info(f"    Keys: {list(result.keys())}")
-                    logger.info(f"    Content preview: {str(result.get('content', ''))[:100] if result.get('content') else 'NO CONTENT'}")
-                    logger.info(f"    Original score: {result.get('original_score', 'NO ORIGINAL SCORE')}")
-        else:
+                    logger.debug(f"    Keys: {list(result.keys())}")
+                    logger.debug(f"    Content preview: {str(result.get('content', ''))[:100] if result.get('content') else 'NO CONTENT'}")
+                    logger.debug(f"    Original score: {result.get('original_score', 'NO ORIGINAL SCORE')}")
+        elif logger.isEnabledFor(logging.DEBUG):
             logger.debug("No results returned from SearchExecutor")
         
         # Log the error returned from SearchExecutor
@@ -163,24 +164,26 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         
         # Store original results count for comparison after further processing
         original_results_count = len(results) if results else 0
-        logger.debug(f"Before additional processing: {original_results_count} results")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Before additional processing: {original_results_count} results")
         
-        logger.debug(f"Starting additional processing for {len(results)} results")
         # Дополнительно обрабатываем результаты для веб-интерфейса
-        logger.debug(f"Starting additional processing for {len(results)} results")
         processed_results = []
         for i, (result, score) in enumerate(results):
-            logger.debug(f"Processing result {i}: type={type(result)}, score={score}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Processing result {i}: type={type(result)}, score={score}")
             if isinstance(result, dict):
                 # Это уже расширенный результат из SearchExecutor
-                logger.debug(f"  Dict result keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
-                logger.debug(f"  Dict content: '{result.get('content', 'NO CONTENT')[:50]}...' if result.get('content') else 'NO CONTENT'")
-                logger.debug(f"  Dict source: {result.get('source', 'NO SOURCE')}")
-                logger.debug(f"  Dict original_score: {result.get('original_score', 'NO ORIGINAL SCORE')}")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"  Dict result keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+                    logger.debug(f"  Dict content: '{result.get('content', 'NO CONTENT')[:50]}...' if result.get('content') else 'NO CONTENT'")
+                    logger.debug(f"  Dict source: {result.get('source', 'NO SOURCE')}")
+                    logger.debug(f"  Dict original_score: {result.get('original_score', 'NO ORIGINAL SCORE')}")
                 processed_results.append((result, score))
             else:
                 # Стандартный формат - пытаемся извлечь содержимое
-                logger.debug(f"  Processing non-dict result: {type(result)}")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(f"  Processing non-dict result: {type(result)}")
                 content = getattr(result, 'page_content', '')
                 metadata = getattr(result, 'metadata', {})
                 
@@ -215,16 +218,18 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
                     )
                 )
         
-        logger.debug(f"Completed additional processing: {len(processed_results)} results")
-        for i, (result, score) in enumerate(processed_results[:3]):
-            logger.debug(f"  Processed result {i}: score={score}, content_len={len(result.get('content', ''))}, source={result.get('source', 'N/A')}, original_score={result.get('original_score', 'N/A')}")
-            logger.debug(f"    Full result keys: {list(result.keys())}")
-            logger.debug(f"    Content preview: {str(result.get('content', ''))[:100] if result.get('content') else 'NO CONTENT'}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Completed additional processing: {len(processed_results)} results")
+            for i, (result, score) in enumerate(processed_results[:3]):
+                logger.debug(f"  Processed result {i}: score={score}, content_len={len(result.get('content', ''))}, source={result.get('source', 'N/A')}, original_score={result.get('original_score', 'N/A')}")
+                logger.debug(f"    Full result keys: {list(result.keys())}")
+                logger.debug(f"    Content preview: {str(result.get('content', ''))[:100] if result.get('content') else 'NO CONTENT'}")
         
         # Log results before potential content fetching from Qdrant
-        logger.info(f"Before Qdrant content fetch: {len(processed_results)} results")
-        for i, (result, score) in enumerate(processed_results[:2]):
-            logger.info(f"  Before Qdrant fetch {i}: score={score}, orig_score={result.get('original_score', 'NO ORIG')}, content_len={len(result.get('content', ''))}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Before Qdrant content fetch: {len(processed_results)} results")
+            for i, (result, score) in enumerate(processed_results[:2]):
+                logger.debug(f"  Before Qdrant fetch {i}: score={score}, orig_score={result.get('original_score', 'NO ORIG')}, content_len={len(result.get('content', ''))}")
         
         # Если контент пустой, пытаемся получить его напрямую из Qdrant
         if all(not result.get('content', '') for result, _ in processed_results) and client:
@@ -251,18 +256,21 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
             from core.search.reranker_manager import RerankerManager
             reranker_manager = RerankerManager.get_instance()
             # Логируем информацию перед reranking для отладки
-            logger.debug(f"Before reranking: {len(processed_results)} results")
-            for i, (result, score) in enumerate(processed_results[:3]):  # Логируем первые 3
-                logger.debug(f"  Result {i}: score={score}, content_len={len(result.get('content', ''))}, source={result.get('source', 'N/A')}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Before reranking: {len(processed_results)} results")
+                for i, (result, score) in enumerate(processed_results[:3]):  # Логируем первые 3
+                    logger.debug(f"  Result {i}: score={score}, content_len={len(result.get('content', ''))}, source={result.get('source', 'N/A')}")
             
             processed_results = reranker_manager.rerank_documents(query, processed_results, config)
             
-            logger.debug(f"After reranking: {len(processed_results)} results")
-            for i, (result, score) in enumerate(processed_results[:3]):  # Логируем первые 3
-                logger.debug(f"  Result {i}: score={score}, content_len={len(result.get('content', ''))}, source={result.get('source', 'N/A')}")
-            logger.debug(f"Reranked to {len(processed_results)} results")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"After reranking: {len(processed_results)} results")
+                for i, (result, score) in enumerate(processed_results[:3]):  # Логируем первые 3
+                    logger.debug(f"  Result {i}: score={score}, content_len={len(result.get('content', ''))}, source={result.get('source', 'N/A')}")
+                logger.debug(f"Reranked to {len(processed_results)} results")
         else:
-            logger.debug(f"Reranker not enabled or no results: reranker_enabled={config.reranker_enabled}, results_count={len(processed_results)}")
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(f"Reranker not enabled or no results: reranker_enabled={config.reranker_enabled}, results_count={len(processed_results)}")
         
         logger.info(f"Search completed successfully with {len(processed_results)} results")
         return processed_results, error

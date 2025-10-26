@@ -393,6 +393,13 @@ def update_docling_settings(form_data: dict, config: Config):
     if form_data.get("docling_images_dir") is not None: 
         config.docling_images_dir = form_data["docling_images_dir"]
     
+    # Обработка максимального размера файла
+    if form_data.get("max_file_size_mb") is not None:
+        try:
+            config.max_file_size_mb = int(form_data["max_file_size_mb"])
+        except ValueError:
+            raise HTTPException(400, detail="Неверное значение максимального размера файла")
+    
     # Обработка новых параметров для управления ресурсами
     config.docling_enable_page_images = form_data.get("docling_enable_page_images", False)
     config.docling_table_detection_advanced = form_data.get("docling_table_detection_advanced", False)

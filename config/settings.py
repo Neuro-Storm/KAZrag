@@ -87,6 +87,7 @@ _ALIAS_MAP = {
     'docling_backend': 'docling.backend',
     'docling_device': 'docling.device',
     'docling_granite_models_dir': 'docling.granite_models_dir',
+    'max_file_size_mb': 'docling.max_file_size_mb',  # Maximum file size in MB for processing
     
     # search aliases
     'search_default_k': 'search.default_k',

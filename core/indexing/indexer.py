@@ -181,11 +181,12 @@ def _process_chunks(chunks: List[Document], filepath: Path, folder_path_resolved
     try:
         # Получение относительного пути файла от корневой папки
         abs_filepath = filepath.resolve()
+        folder_path_resolved = folder_path_resolved.resolve()  # Ensure both paths are resolved for Windows compatibility
         relative_source_path = abs_filepath.relative_to(folder_path_resolved)
     except ValueError:
         # Если файл не в корневой папке, используем только имя файла
         logger.warning(f"Файл {filepath} не находится внутри {folder_path_resolved}. Используется только имя файла.")
-        relative_source_path = abs_filepath.name
+        relative_source_path = Path(abs_filepath.name)
     
     # Добавляем метаданные к чанкам с помощью MetadataManager
     # Учитываем настройки из конфигурации
@@ -219,11 +220,12 @@ def _process_documents_without_chunking(documents: List[Document], filepath: Pat
     try:
         # Получение относительного пути файла от корневой папки
         abs_filepath = filepath.resolve()
+        folder_path_resolved = folder_path_resolved.resolve()  # Ensure both paths are resolved for Windows compatibility
         relative_source_path = abs_filepath.relative_to(folder_path_resolved)
     except ValueError:
         # Если файл не в корневой папке, используем только имя файла
         logger.warning(f"Файл {filepath} не находится внутри {folder_path_resolved}. Используется только имя файла.")
-        relative_source_path = abs_filepath.name
+        relative_source_path = Path(abs_filepath.name)
     
     # Добавляем метаданные к документам с помощью MetadataManager
     # Учитываем настройки из конфигурации

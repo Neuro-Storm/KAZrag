@@ -163,6 +163,13 @@ class DoclingConverter:
         try:
             config = self.config_manager.get()
             
+            # Проверка размера файла перед обработкой (по умолчанию 100MB)
+            max_file_size = getattr(config, "max_file_size_mb", 100)  # 100MB по умолчанию
+            file_size_mb = file_path.stat().st_size / (1024 * 1024)
+            if file_size_mb > max_file_size:
+                logger.warning(f"Файл {file_path} превышает максимальный размер {max_file_size}MB (размер: {file_size_mb:.2f}MB). Пропуск обработки.")
+                return []
+            
             # Проверяем и устанавливаем режим оффлайн при необходимости
             auto_download = getattr(config, "auto_download_models", True)
             # Offline mode handled in _setup_model_paths; refresh if config changed
