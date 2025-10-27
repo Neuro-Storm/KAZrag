@@ -101,6 +101,8 @@ evaluation_results/
 
 # Директория с моделями
 models/
+# Исключение для папки core/models
+!core/models/
 
 # Source code collection script and its output
 collect_source_code.py
