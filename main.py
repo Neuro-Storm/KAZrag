@@ -2,7 +2,6 @@
 
 import os
 import sys
-import unittest  # Явный импорт для PyInstaller
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -24,11 +23,10 @@ os.environ["TOKENIZERS_PARALLELISM"] = "false"  # Стабильность
 
 # Импорт модулей для настройки приложения
 from app.startup import startup_event_handler
-from config.logging_config import setup_logging, get_logger, setup_intercept_handler
+from config.logging_config import setup_logging, get_logger
 
 # Настройка логирования через централизованный модуль
 setup_logging()
-setup_intercept_handler()
 logger = get_logger(__name__)
 
 # Загружаем переменные окружения из .env файла
@@ -63,22 +61,7 @@ app = create_app_with_lifespan()
 
 if __name__ == "__main__":
     logger.info("Начало запуска приложения")
-    # Загрузка конфигурации при запуске с проверкой Qdrant
-    try:
-        logger.info("Попытка импорта ConfigManager")
-        from config.config_manager import ConfigManager
-        logger.info("ConfigManager успешно импортирован")
-        logger.info("Загрузка конфигурации")
-        config_manager = ConfigManager.get_instance()
-        config_manager.get()
-        logger.info("Конфигурация успешно загружена")
-    except RuntimeError as e:
-        logger.error(f"Ошибка при загрузке конфигурации: {e}")
-        sys.exit(1)
-    # Создание основного приложения FastAPI через фабрику
-    logger.info("Создание приложения")
-    app = create_app_with_lifespan()
-    logger.info("Приложение успешно создано")
+    # Загрузка конфигурации при запуске с проверкой Qdrant будет выполнена в startup_event_handler
     logger.info("Обработчики событий зарегистрированы через lifespan")
     # Запуск сервера
     try:

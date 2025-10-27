@@ -36,33 +36,25 @@ def startup_event_handler() -> None:
             except Exception as e:
                 logger.exception(f"Error initializing BM25 collection configuration: {e}")
         
-        # Initialize Docling converter
-        logger.info("Initializing Docling converter")
+        # Initialize Docling converter - only verify it's available
+        logger.info("Checking Docling converter availability")
         try:
             from core.converting.docling_converter import DoclingConverter
-            docling_converter = DoclingConverter()
-            logger.info("Docling converter initialized successfully")
+            # Don't create instance here to avoid loading models at startup
+            logger.info("Docling converter available")
         except Exception as e:
-            logger.exception(f"Error initializing Docling converter: {e}")
+            logger.exception(f"Error checking Docling converter: {e}")
             
-        # Проверяем и загружаем Granite-модель при старте, если backend=granite
+        # Check if granite backend is configured
         try:
             config = config_manager.get()
             if config.docling_backend == "granite":
-                from huggingface_hub import snapshot_download
                 from pathlib import Path
                 granite_dir = config.granite_models_dir
                 granite_dir.mkdir(parents=True, exist_ok=True)
-                if not any(granite_dir.iterdir()):
-                    logger.info("Granite-модель не найдена — загружаем...")
-                    snapshot_download(
-                        repo_id="ibm-granite/granite-docling-258M",
-                        local_dir=granite_dir,
-                        cache_dir=str(granite_dir.parent / "huggingface_cache")
-                    )
-                    logger.info("Granite-модель успешно загружена в ./models/granite")
+                logger.info("Granite backend selected, model will be downloaded on-demand")
         except Exception as e:
-            logger.warning(f"Не удалось загрузить Granite-модель: {e}")
+            logger.warning(f"Error checking Granite backend: {e}")
             
     except Exception as e:
         logger.exception(f"Error loading configuration: {e}")

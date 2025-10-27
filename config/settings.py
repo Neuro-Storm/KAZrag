@@ -14,40 +14,26 @@ from core.models.config import MainConfig
 # Определение алиасов вне класса, чтобы избежать конфликта с Pydantic
 # Все алиасы, требуемые приложением, включая стандартные имена для обратной совместимости
 _ALIAS_MAP = {
-    # indexing aliases - both simple and prefixed versions for compatibility
+    # indexing aliases - simple versions for compatibility
     'folder_path': 'indexing.folder_path',
     'collection_name': 'indexing.collection_name',
     'chunk_size': 'indexing.chunk_size',
-    'indexing_chunk_size': 'indexing.chunk_size',  # Original prefixed version
     'chunk_overlap': 'indexing.chunk_overlap',
-    'indexing_chunk_overlap': 'indexing.chunk_overlap',  # Original prefixed version
     'chunking_strategy': 'indexing.chunking_strategy',
-    'indexing_chunking_strategy': 'indexing.chunking_strategy',  # Original prefixed version
     'paragraphs_per_chunk': 'indexing.paragraphs_per_chunk',
-    'indexing_paragraphs_per_chunk': 'indexing.paragraphs_per_chunk',  # Original prefixed version
     'paragraph_overlap': 'indexing.paragraph_overlap',
-    'indexing_paragraph_overlap': 'indexing.paragraph_overlap',  # Original prefixed version
     'sentences_per_chunk': 'indexing.sentences_per_chunk',
-    'indexing_sentences_per_chunk': 'indexing.sentences_per_chunk',  # Original prefixed version
     'sentence_overlap': 'indexing.sentence_overlap',
-    'indexing_sentence_overlap': 'indexing.sentence_overlap',  # Original prefixed version
     'use_multilevel_chunking': 'indexing.use_multilevel_chunking',
     'index_dense': 'indexing.index_dense',
-    'indexing_index_dense': 'indexing.index_dense',  # Original prefixed version
     'index_bm25': 'indexing.index_bm25',
-    'indexing_index_bm25': 'indexing.index_bm25',  # Original prefixed version
     'index_hybrid': 'indexing.index_hybrid',
-    'indexing_index_hybrid': 'indexing.index_hybrid',  # Original prefixed version
     'embedding_batch_size': 'embedding.batch_size',
     'indexing_batch_size': 'indexing.batch_size',
     'force_recreate': 'indexing.force_recreate',
-    'indexing_force_recreate': 'indexing.force_recreate',  # Original prefixed version
     'memory_threshold': 'indexing.memory_threshold',
-    'indexing_memory_threshold': 'indexing.memory_threshold',  # Original prefixed version
     'sparse_embedding': 'indexing.sparse_embedding',
-    'indexing_sparse_embedding': 'indexing.sparse_embedding',  # Original prefixed version
     'is_indexed': 'indexing.is_indexed',
-    'indexing_is_indexed': 'indexing.is_indexed',  # Original prefixed version
     
     # embedding aliases
     'current_hf_model': 'embedding.current_hf_model',
@@ -92,9 +78,7 @@ _ALIAS_MAP = {
     # search aliases
     'search_default_k': 'search.default_k',
     'use_hybrid': 'search.use_hybrid',
-    'search_use_hybrid': 'search.use_hybrid',  # Original prefixed version
     'hybrid_alpha': 'search.hybrid_alpha',
-    'search_hybrid_alpha': 'search.hybrid_alpha',  # Original prefixed version
     'search_default_collection': 'search.default_collection',
     'search_default_device': 'search.default_device',
     'search_default_type': 'search.default_type',
@@ -108,7 +92,6 @@ _ALIAS_MAP = {
     # bm25 aliases
     'use_bm25': 'bm25.enabled',
     'sparse_vector_name': 'bm25.sparse_vector_name',
-    'bm25_sparse_vector_name': 'bm25.sparse_vector_name',  # Original prefixed version
     'bm25_tokenizer': 'bm25.tokenizer',
     'bm25_min_token_len': 'bm25.min_token_len',
     
@@ -123,7 +106,6 @@ _ALIAS_MAP = {
     # metadata aliases
     'enable_metadata_extraction': 'metadata.enable_extraction',
     'custom_fields': 'metadata.custom_fields',  # Also support non-prefixed version
-    'metadata_custom_fields': 'metadata.custom_fields',
     'metadata_extract_pdf': 'metadata.extract_pdf',
     'metadata_extract_image': 'metadata.extract_image',
     'metadata_extract_docx': 'metadata.extract_docx',
@@ -167,8 +149,22 @@ _ALIAS_MAP = {
     
     # Additional consistency aliases
     'granite_models_dir': 'docling.granite_models_dir',  # Duplicate alias
-    'indexing_default_batch_size': 'indexing.batch_size',  # Same as indexing.batch_size
 }
+
+
+def _traverse_path(obj, path: str):
+    """Utility function to traverse an object using dot notation path."""
+    for part in path.split('.'):
+        obj = getattr(obj, part)
+    return obj
+
+
+def _traverse_path_set(obj, path: str, value):
+    """Utility function to set a value in an object using dot notation path."""
+    parts = path.split('.')
+    for part in parts[:-1]:
+        obj = getattr(obj, part)
+    setattr(obj, parts[-1], value)
 
 
 class Config(BaseSettings):
@@ -204,22 +200,16 @@ class Config(BaseSettings):
             if "." in name:
                 if hasattr(main, "get_nested"):
                     return main.get_nested(name)
-                # fallback simple traversal
-                obj = main
-                for part in name.split('.'):
-                    obj = getattr(obj, part)
-                return obj
+                # fallback simple traversal using utility function
+                return _traverse_path(main, name)
             # Try the alias mapping first (for prefixed/legacy names)
             elif name in _ALIAS_MAP:
                 actual_path = _ALIAS_MAP[name]
                 if hasattr(main, "get_nested"):
                     return main.get_nested(actual_path)
                 else:
-                    # fallback: split path and traverse
-                    obj = main
-                    for part in actual_path.split('.'):
-                        obj = getattr(obj, part)
-                    return obj
+                    # fallback: use utility function for path traversal
+                    return _traverse_path(main, actual_path)
             # Handle special cases like huggingface_token that was stored as _huggingface_token
             elif name == 'huggingface_token':
                 return getattr(self, '_huggingface_token', None)
@@ -251,11 +241,8 @@ class Config(BaseSettings):
                             if hasattr(main, "get_nested"):
                                 return main.get_nested(nested_name)
                             else:
-                                # fallback: split path and traverse
-                                obj = main
-                                for part in nested_name.split('.'):
-                                    obj = getattr(obj, part)
-                                return obj
+                                # fallback: use utility function for path traversal
+                                return _traverse_path(main, nested_name)
                         except (AttributeError, KeyError):
                             continue  # Try the next path
                 except Exception:
@@ -276,12 +263,8 @@ class Config(BaseSettings):
             if hasattr(main, "set_nested"):
                 main.set_nested(name, value)
                 return
-            # fallback
-            parts = name.split('.')
-            obj = main
-            for part in parts[:-1]:
-                obj = getattr(obj, part)
-            setattr(obj, parts[-1], value)
+            # fallback: use utility function for path setting
+            _traverse_path_set(main, name, value)
             return
         
         # For 'main' attribute and class attributes, set directly
@@ -303,12 +286,8 @@ class Config(BaseSettings):
                 main.set_nested(actual_path, value)
                 return
             else:
-                # fallback: split path and set
-                parts = actual_path.split('.')
-                obj = main
-                for part in parts[:-1]:
-                    obj = getattr(obj, part)
-                setattr(obj, parts[-1], value)
+                # fallback: use utility function for path setting
+                _traverse_path_set(main, actual_path, value)
                 return
         
         # For other attributes, check if they exist in main config

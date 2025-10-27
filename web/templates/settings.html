@@ -387,9 +387,6 @@
                         <input type="hidden" id="index_dense" name="index_dense" value="{{ 'True' if config.index_dense else 'False' }}">
                         <input type="hidden" id="index_bm25" name="index_bm25" value="{{ 'True' if config.index_bm25 else 'False' }}">
                         <input type="hidden" id="index_hybrid" name="index_hybrid" value="{{ 'True' if config.index_hybrid else 'False' }}">
-                        <!-- Legacy fields kept for compatibility -->
-                        <input type="hidden" id="use_dense" name="use_dense" value="{{ 'True' if config.index_dense else 'False' }}">
-                        <input type="hidden" id="use_hybrid" name="use_hybrid" value="{{ 'True' if config.index_hybrid else 'False' }}">
                     </fieldset>
                     
                     <fieldset>
