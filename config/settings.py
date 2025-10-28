@@ -107,6 +107,7 @@ _ALIAS_MAP = {
     # metadata aliases
     'enable_metadata_extraction': 'metadata.enable_extraction',
     'custom_fields': 'metadata.custom_fields',  # Also support non-prefixed version
+    'metadata_custom_fields': 'metadata.custom_fields',  # Добавляем алиас для metadata_custom_fields
     'metadata_extract_pdf': 'metadata.extract_pdf',
     'metadata_extract_image': 'metadata.extract_image',
     'metadata_extract_docx': 'metadata.extract_docx',
