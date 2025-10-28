@@ -12,6 +12,7 @@ class DoclingConfig(BaseModel):
     
     # Основные настройки обработки
     use_ocr: bool = Field(default=True, description="Использовать OCR для изображений")
+    force_full_ocr: bool = Field(default=False, description="Принудительно использовать OCR для всего PDF документа, включая внедренный текст")
     use_tables: bool = Field(default=True, description="Обрабатывать таблицы")
     use_formulas: bool = Field(default=True, description="Обрабатывать формулы")
     model_backend: str = Field(default="huggingface", pattern=r"^(huggingface|local|api)$", description="Бэкенд для моделей")

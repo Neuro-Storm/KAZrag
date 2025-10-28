@@ -60,6 +60,7 @@ _ALIAS_MAP = {
     
     # docling aliases - These were removed from MainConfig but kept for backward compatibility
     'docling_use_ocr': 'docling.use_ocr',
+    'force_full_ocr': 'docling.force_full_ocr',  # Новый параметр - принудительный OCR всего документа PDF
     'docling_use_tables': 'docling.use_tables',
     'docling_use_formulas': 'docling.use_formulas',
     'docling_model_backend': 'docling.model_backend',

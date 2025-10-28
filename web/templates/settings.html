@@ -423,6 +423,10 @@
                             <label for="docling_use_ocr">Включить OCR</label>
                         </div>
                         <div>
+                            <input type="checkbox" id="force_full_ocr" name="force_full_ocr" value="True" {% if config.force_full_ocr %}checked{% endif %}>
+                            <label for="force_full_ocr">Принудительно использовать OCR для всего PDF документа (включая внедренный текст)</label>
+                        </div>
+                        <div>
                             <input type="checkbox" id="docling_use_tables" name="docling_use_tables" value="True" {% if config.docling_use_tables %}checked{% endif %}>
                             <label for="docling_use_tables">Включить парсинг таблиц</label>
                         </div>

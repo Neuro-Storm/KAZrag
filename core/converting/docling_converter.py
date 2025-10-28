@@ -142,6 +142,11 @@ class DoclingConverter:
                 ocr_lang_list = self._ensure_ocr_lang_list(config.docling_ocr_lang)
                 kwargs["ocr_options"] = EasyOcrOptions(lang=ocr_lang_list)
             
+            # Force OCR on entire PDF document (including pages with embedded text)
+            if hasattr(config, 'force_full_ocr') and config.force_full_ocr:
+                kwargs["do_ocr"] = True
+                # This ensures OCR is performed even on pages that already have text
+            
             if config.docling_use_tables:
                 kwargs["table_structure_options"] = TableStructureOptions(
                     table_former_mode=TABLE_FORMER_MODE,

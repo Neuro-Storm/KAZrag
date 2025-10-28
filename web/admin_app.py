@@ -378,6 +378,7 @@ def update_docling_settings(form_data: dict, config: Config):
     """Обновляет настройки Docling."""
     # Checkboxes теперь bool
     config.docling_use_ocr = form_data.get("docling_use_ocr", False)
+    config.force_full_ocr = form_data.get("force_full_ocr", False)  # Новый параметр
     config.docling_use_tables = form_data.get("docling_use_tables", False)
     config.docling_use_formulas = form_data.get("docling_use_formulas", False)
     
