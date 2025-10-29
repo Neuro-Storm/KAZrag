@@ -10,6 +10,16 @@ from fastembed import SparseTextEmbedding
 from qdrant_client.models import SparseVector
 from config.config_manager import ConfigManager
 
+# Попробуем импортировать Embeddings из langchain для совместимости
+try:
+    from langchain_core.embeddings import Embeddings
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    LANGCHAIN_AVAILABLE = False
+    class Embeddings:
+        """Заглушка для Embeddings если langchain недоступен"""
+        pass
+
 logger = logging.getLogger(__name__)
 
 def get_sparse_model(model_name: str = None):
@@ -66,8 +76,8 @@ def get_sparse_model(model_name: str = None):
             )
 
 
-class SparseEmbeddingAdapter:
-    """Адаптер для sparse эмбеддингов, заменяющий Fastembed на native BM25."""
+class SparseEmbeddingAdapter(Embeddings):
+    """Адаптер для sparse эмбеддингов, совместимый с langchain Embeddings интерфейсом."""
     
     def __init__(self, config=None):
         """Инициализирует адаптер."""
@@ -127,3 +137,7 @@ class SparseEmbeddingAdapter:
     def embed_query(self, query: str) -> Dict[str, Any]:
         """Single query embedding."""
         return self.encode([query], return_sparse=True)[0]
+    
+    def embed_documents(self, texts: List[str]) -> List[Dict[str, Any]]:
+        """Generate sparse vectors for multiple documents."""
+        return self.encode(texts, return_sparse=True)
