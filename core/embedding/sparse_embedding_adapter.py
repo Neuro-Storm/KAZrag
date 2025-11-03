@@ -115,7 +115,10 @@ class SparseEmbeddingAdapter(Embeddings):
             indices = [idx for idx, _ in unique_pairs]
             values = [val for _, val in unique_pairs]
             
-            sparse_vectors.append({"indices": indices, "values": values})
+            # Создаем объект SparseVector как ожидает Qdrant/langchain
+            from qdrant_client.models import SparseVector
+            sparse_vector = SparseVector(indices=indices, values=values)
+            sparse_vectors.append(sparse_vector)
         
         logger.debug(f"Generated {len(sparse_vectors)} sparse vectors for BM25")
         return sparse_vectors
@@ -134,9 +137,16 @@ class SparseEmbeddingAdapter(Embeddings):
         
         return tokens
 
-    def embed_query(self, query: str) -> Dict[str, Any]:
+    def embed_query(self, query: str) -> Any:  # Returns SparseVector
         """Single query embedding."""
-        return self.encode([query], return_sparse=True)[0]
+        from qdrant_client.models import SparseVector
+        # Encode returns a list, so get the first element
+        encoded_result = self.encode([query], return_sparse=True)[0]
+        # If it's already a SparseVector, return it, otherwise create one from dict
+        if hasattr(encoded_result, 'indices') and hasattr(encoded_result, 'values'):
+            return encoded_result
+        else:  # It's a dict, so create SparseVector from it
+            return SparseVector(indices=encoded_result["indices"], values=encoded_result["values"])
     
     def embed_documents(self, texts: List[str]) -> List[Dict[str, Any]]:
         """Generate sparse vectors for multiple documents."""
