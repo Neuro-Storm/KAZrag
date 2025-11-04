@@ -12,10 +12,10 @@ from docling.datamodel.pipeline_options import (
     TableStructureOptions,
     EasyOcrOptions
 )
-from docling.datamodel import vlm_model_specs  # Правильный импорт для Granite specs
+from docling.datamodel.pipeline_options import granite_vision_vlm_conversion_options  # Правильный импорт для Granite specs
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.pipeline.vlm_pipeline import VlmPipeline
-from docling.datamodel.accelerator_options import AcceleratorOptions, AcceleratorDevice
+from docling.datamodel.pipeline_options import AcceleratorOptions, AcceleratorDevice
 
 try:
     from docling.datamodel.table_structure import TableFormerMode
@@ -112,7 +112,7 @@ class DoclingConverter:
             ocr_lang_list = self._ensure_ocr_lang_list(config.docling_ocr_lang)
             
             vlm_options = VlmPipelineOptions(
-                vlm_model_specs=vlm_model_specs.GRANITEDOCLING_TRANSFORMERS,  # Правильная константа для CPU/GPU
+                vlm_options=granite_vision_vlm_conversion_options,  # Правильная константа для CPU/GPU
                 accelerator_options=accelerator,
                 table_structure_options=TableStructureOptions(
                     table_former_mode=TABLE_FORMER_MODE,
