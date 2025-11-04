@@ -2,6 +2,8 @@
 
 import logging
 import os
+import tempfile
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable
 
@@ -180,13 +182,39 @@ class DoclingConverter:
             # Offline mode handled in _setup_model_paths; refresh if config changed
             self._setup_model_paths()
             
+            # Создаем временный файл с ASCII именем для обхода проблемы с Unicode именами файлов в Docling
+            temp_file_path = None
+            if file_path.suffix.lower() == '.pdf':
+                # Проверяем, содержит ли имя файла не-ASCII символы (Unicode)
+                if any(ord(char) > 127 for char in str(file_path)):
+                    # Создаем временный файл с ASCII именем
+                    with tempfile.NamedTemporaryFile(
+                        delete=False,
+                        suffix=file_path.suffix,
+                        prefix="temp_docling_"
+                    ) as temp_file:
+                        temp_file_path = Path(temp_file.name)
+                    
+                    # Копируем оригинальный файл во временный
+                    shutil.copy2(file_path, temp_file_path)
+                    processing_path = temp_file_path
+                else:
+                    processing_path = file_path
+            else:
+                processing_path = file_path
+            
             try:
                 # Используем основной конвертер, инициализированный в _initialize_converter
-                result = self.converter.convert(file_path)
+                result = self.converter.convert(processing_path)
             finally:
-                pass
+                # Удаляем временный файл, если он был создан
+                if temp_file_path and temp_file_path.exists():
+                    try:
+                        temp_file_path.unlink()
+                    except Exception as e:
+                        logger.warning(f"Не удалось удалить временный файл {temp_file_path}: {e}")
             
-            # Формирование пути для выходного файла
+            # Формирование пути для выходного файла (используем оригинальное имя файла)
             output_path = output_dir / f"{file_path.stem}.md"
             
             # Сохранение результата в Markdown
