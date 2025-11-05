@@ -65,6 +65,9 @@ class GGUFEmbeddings(Embeddings):
             config_manager = ConfigManager.get_instance()
             config = config_manager.get()
             
+            logger.info(f"Инициализация GGUF эмбеддингов с моделью: {model_path}")
+            logger.info(f"Контекст модели: {config.gguf_model_n_ctx}, количество потоков: {config.rag_threads}")
+            
             # Проверяем, существует ли файл модели
             if not os.path.exists(model_path):
                 # Если файл не найден, пытаемся найти его в стандартных местах
@@ -94,30 +97,69 @@ class GGUFEmbeddings(Embeddings):
             global _embedding_dim_cache
             if model_path in _embedding_dim_cache:
                 self.expected_dim = _embedding_dim_cache[model_path]
+                logger.info(f"Размерность вектора загружена из кэша: {self.expected_dim}")
                 # Инициализируем модель без тестового запроса
                 n_gpu_layers = -1 if device == "cuda" else 0
-                self.model = Llama(
-                    model_path=model_path,
-                    n_gpu_layers=n_gpu_layers,  # Количество слоев на GPU (-1 для всех слоев)
-                    n_ctx=config.gguf_model_n_ctx,  # Размер контекста из конфигурации
-                    embedding=True,  # Включаем режим эмбеддингов
-                    verbose=False  # Отключаем подробный вывод
-                )
+                try:
+                    self.model = Llama(
+                        model_path=model_path,
+                        n_gpu_layers=n_gpu_layers,  # Количество слоев на GPU (-1 для всех слоев)
+                        n_ctx=config.gguf_model_n_ctx,  # Размер контекста из конфигурации
+                        embedding=True,  # Включаем режим эмбеддингов
+                        use_mmap=True,  # Используем mmap для экономии памяти
+                        use_mlock=False,  # Не используем mlock, чтобы позволить свопинг
+                        n_threads=config.rag_threads,  # Используем количество потоков из конфига
+                        verbose=False  # Отключаем подробный вывод
+                    )
+                    logger.info(f"GGUF модель инициализирована для эмбеддингов, контекст: {config.gguf_model_n_ctx}")
+                except Exception as e:
+                    # Если размер контекста слишком велик, выводим информативное сообщение
+                    if "n_ctx_per_seq" in str(e) or "context overflow" in str(e).lower():
+                        error_msg = (f"Контекст GGUF модели ({config.gguf_model_n_ctx}) больше, "
+                                    f"чем контекст, на котором модель была обучена. Это приводит к проблемам с индексацией. "
+                                    f"Пожалуйста, измените параметр 'embedding.gguf.model_n_ctx' в настройках на 512 или "
+                                    f"другое значение, соответствующее вашей модели. Ошибка: {str(e)}")
+                        logger.error(error_msg)
+                        raise ValueError(error_msg) from e
+                    else:
+                        logger.error(f"Ошибка при инициализации GGUF модели: {e}")
+                        raise
             else:
                 # Инициализируем модель для определения размерности вектора
                 n_gpu_layers = -1 if device == "cuda" else 0
-                self.model = Llama(
-                    model_path=model_path,
-                    n_gpu_layers=n_gpu_layers,  # Количество слоев на GPU (-1 для всех слоев)
-                    n_ctx=config.gguf_model_n_ctx,  # Размер контекста из конфигурации
-                    embedding=True,  # Включаем режим эмбеддингов
-                    verbose=False  # Отключаем подробный вывод
-                )
+                try:
+                    self.model = Llama(
+                        model_path=model_path,
+                        n_gpu_layers=n_gpu_layers,  # Количество слоев на GPU (-1 для всех слоев)
+                        n_ctx=config.gguf_model_n_ctx,  # Размер контекста из конфигурации
+                        embedding=True,  # Включаем режим эмбеддингов
+                        use_mmap=True,  # Используем mmap для экономии памяти
+                        use_mlock=False,  # Не используем mlock, чтобы позволить свопинг
+                        n_threads=config.rag_threads,  # Используем количество потоков из конфига
+                        verbose=False  # Отключаем подробный вывод
+                    )
+                    logger.info(f"GGUF модель инициализирована для эмбеддингов, контекст: {config.gguf_model_n_ctx}")
+                except Exception as e:
+                    # Если размер контекста слишком велик, выводим информативное сообщение
+                    if "n_ctx_per_seq" in str(e) or "context overflow" in str(e).lower():
+                        error_msg = (f"Контекст GGUF модели ({config.gguf_model_n_ctx}) больше, "
+                                    f"чем контекст, на котором модель была обучена. Это приводит к проблемам с индексацией. "
+                                    f"Пожалуйста, измените параметр 'embedding.gguf.model_n_ctx' в настройках на 512 или "
+                                    f"другое значение, соответствующее вашей модели. Ошибка: {str(e)}")
+                        logger.error(error_msg)
+                        raise ValueError(error_msg) from e
+                    else:
+                        logger.error(f"Ошибка при инициализации GGUF модели: {e}")
+                        raise
+                
                 # Определяем ожидаемую размерность вектора на основе тестового запроса
+                logger.info("Определение размерности вектора на основе тестового запроса")
                 test_embedding = self.model.create_embedding("test")
                 self.expected_dim = len(test_embedding['data'][0]['embedding'])
+                logger.info(f"Размерность вектора определена: {self.expected_dim}")
                 # Сохраняем размерность в кэш
                 _embedding_dim_cache[model_path] = self.expected_dim
+                logger.info(f"Размерность вектора сохранена в кэш для модели {model_path}")
             
             self.device = device
         except ImportError:
@@ -129,29 +171,53 @@ class GGUFEmbeddings(Embeddings):
     
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """Генерация эмбеддингов для списка документов."""
+        logger.info(f"Начало генерации эмбеддингов для {len(texts)} документов")
         embeddings = []
-        for text in texts:
+        for i, text in enumerate(texts):
+            logger.debug(f"Обработка документа {i+1}/{len(texts)}, длина: {len(text)} символов")
             embedding = self.embed_query(text)
             embeddings.append(embedding)
+        logger.info(f"Генерация эмбеддингов завершена для {len(texts)} документов")
         return embeddings
     
     def embed_query(self, text: str) -> List[float]:
         """Генерация эмбеддинга для одного запроса."""
         try:
+            logger.info(f"Начало генерации эмбеддинга для текста длиной {len(text)} символов")
+            
             # Получаем эмбеддинг через llama.cpp
-            embedding = self.model.create_embedding(text)
-            # Извлекаем вектор из результата
-            vector = embedding.get('data', [{}])[0].get('embedding', []) or getattr(embedding, 'embedding', [])
+            embedding_result = self.model.create_embedding(text)
+            logger.info(f"Результат эмбеддинга получен, тип: {type(embedding_result)}")
+            
+            # Извлекаем вектор из результата - llama-cpp-python может возвращать эмбеддинги по-разному
+            if isinstance(embedding_result, dict):
+                # Стандартный формат: {'data': [{'embedding': [...]}, ...], 'model', 'object', ...}
+                embedding_data = embedding_result.get('data', [])
+                logger.info(f"Структура результата: {list(embedding_result.keys()) if isinstance(embedding_result, dict) else 'N/A'}")
+                logger.info(f"Данные эмбеддинга: {len(embedding_data)} элементов")
+                if len(embedding_data) > 0:
+                    vector = embedding_data[0].get('embedding', [])
+                else:
+                    raise ValueError("No embedding data found in response")
+            else:
+                # Альтернативный формат: объект с атрибутом embedding
+                logger.info(f"Результат не является словарем, атрибуты: {dir(embedding_result) if hasattr(embedding_result, '__dict__') else 'N/A'}")
+                vector = getattr(embedding_result, 'embedding', []) if hasattr(embedding_result, 'embedding') else []
+            
             if not vector:
-                raise ValueError("Invalid embedding format")
+                raise ValueError("Invalid embedding format - no embedding vector found")
+            
+            logger.info(f"Длина вектора эмбеддинга: {len(vector)}, ожидаемая длина: {self.expected_dim}")
             
             # Проверяем размерность вектора
             if len(vector) != self.expected_dim:
-                # logger.warning(f"Embedding dimension mismatch: {len(vector)} vs {self.expected_dim}")
-                raise ValueError(f"Embedding dimension mismatch: {len(vector)} vs {self.expected_dim}")
+                logger.warning(f"Embedding dimension mismatch: {len(vector)} vs {self.expected_dim}, actual model dim: {len(vector)}")
+                # Обновляем размерность, если она изменилась
+                self.expected_dim = len(vector)
             
             return vector
         except Exception as e:
+            logger.error(f"Ошибка при получении эмбеддинга для текста '{text[:50]}...': {e}")
             raise Exception(f"Ошибка при получении эмбеддинга: {e}")
 
 

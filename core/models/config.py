@@ -83,7 +83,7 @@ class RerankerConfig(BaseModel):
 class GGUFConfig(BaseModel):
     """Конфигурация для GGUF моделей."""
     
-    model_n_ctx: int = Field(default=4096, ge=1, description="Контекст GGUF модели")
+    model_n_ctx: int = Field(default=512, ge=1, description="Контекст GGUF модели")
 
 
 class EmbeddingConfig(BaseModel):
