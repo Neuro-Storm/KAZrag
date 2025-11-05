@@ -7,6 +7,7 @@ from qdrant_client.http.models import CountResult
 from config.config_manager import ConfigManager
 from config.settings import Config
 from core.embedding.embeddings import get_dense_embedder, aget_dense_embedder, get_search_device
+from core.embedding.embedding_manager import EmbeddingManager
 from core.qdrant.qdrant_client import aget_qdrant_client
 from core.search.collection_analyzer import CollectionAnalyzer
 from core.search.search_executor import SearchExecutor
@@ -49,6 +50,9 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         # Получаем эмбеддер для поиска
         search_device = get_search_device(device)
         embedder = await aget_dense_embedder(config, search_device)
+        
+        # Получаем экземпляр менеджера эмбеддингов для получения размерности с кэшированием
+        embedding_manager = EmbeddingManager.get_instance()
         
         # Инициализируем sparse embedding если он нужен
         sparse_emb = None
@@ -123,10 +127,9 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
         # Инициализируем кэш запросов
         query_cache = QueryCache(client, config)
         
-        # Получаем размерность вектора для текущей модели
-        # Для получения размерности создаем тестовый эмбеддинг
-        test_embedding = embedder.embed_query("test")
-        vector_size = len(test_embedding)
+        # Получаем размерность вектора для текущей модели с кэшированием
+        # Это избегает создания тестового эмбеддинга при каждом запросе
+        vector_size = embedding_manager.get_vector_size(config, search_device)
         
         # Получаем или создаем эмбеддинг запроса с использованием кэша
         query_vector = query_cache.get_or_create_query_embedding(query, collection_name, vector_size)
@@ -141,8 +144,8 @@ async def search_in_collection(query: str, collection_name: str, device: str, k:
             results, error = await SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter, collection_name)
         else:
             # Выполняем поиск с использованием кэшированного вектора
-            # Используем SearchExecutor для плотного поиска тоже
-            results, error = await SearchExecutor.execute_search(client, search_mode, vector_name, sparse_params, query, k, metadata_filter, collection_name)
+            # Используем SearchExecutor для плотного поиска с готовым вектором, чтобы избежать повторной векторизации
+            results, error = await SearchExecutor.execute_search_with_vector(client, query, query_vector, k, metadata_filter, collection_name)
         
         logger.info(f"SearchExecutor returned: {len(results) if results else 0} results, error: {error}")
         

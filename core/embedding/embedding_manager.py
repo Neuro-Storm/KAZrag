@@ -100,6 +100,7 @@ class EmbeddingManager:
     def __init__(self):
         """Initialize EmbeddingManager."""
         self._embedder_cache: OrderedDict = OrderedDict()
+        self._vector_size_cache: Dict[Tuple[str, str], int] = {}  # Кэш размерностей (модель, устройство) -> размерность
         self._lock = threading.Lock()  # Синхронный лок для синхронизации доступа к кэшу
         
     @classmethod
@@ -189,7 +190,9 @@ class EmbeddingManager:
                 "mixedbread-ai/mxbai-embed-large-v1",
                 "nomic-ai/nomic-embed-text-v1",
                 "nomic-ai/nomic-embed-text-v1.5",
-                "nomic-ai/nomic-embed-text-v1.5-f16"
+                "nomic-ai/nomic-embed-text-v1.5-f16",
+                "nomic-ai/nomic-embed-text-v2",
+                "nomic-ai/nomic-embed-text-v2-moe"
             ]
             model_lower = model_name.lower()
             
@@ -202,7 +205,8 @@ class EmbeddingManager:
                 embedder = HuggingFaceEmbeddings(
                     model_name=model_name,
                     model_kwargs=model_kwargs,
-                    encode_kwargs=encode_kwargs
+                    encode_kwargs=encode_kwargs,
+                    show_progress=True
                 )
 
                 # Устанавливаем batch_size для последующего использования
@@ -410,6 +414,36 @@ class EmbeddingManager:
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future = executor.submit(run_embed_query)
             return await asyncio.get_event_loop().run_in_executor(None, future.result)
+
+    def get_vector_size(self, config: Config, device: Optional[str] = None) -> int:
+        """Получает размерность вектора для указанной модели и устройства с кэшированием.
+        
+        Args:
+            config: Configuration object
+            device: Device to use for embeddings (optional)
+            
+        Returns:
+            int: Размерность вектора
+        """
+        model_name = config.current_hf_model
+        if device is None:
+            device = self.get_device(config.device)
+        
+        # Ключ кэша - кортеж (модель, устройство)
+        cache_key = (model_name, device)
+        
+        # Проверяем, есть ли в кэше размерность для этой модели и устройства
+        if cache_key in self._vector_size_cache:
+            return self._vector_size_cache[cache_key]
+        
+        # Если нет в кэше, создаем эмбеддинг для тестового текста и получаем размерность
+        embedder = self.get_embedder(config, device)
+        test_embedding = embedder.embed_query("test")
+        vector_size = len(test_embedding)
+        
+        # Сохраняем размерность в кэш
+        self._vector_size_cache[cache_key] = vector_size
+        return vector_size
 
     async def aembed_texts(self, texts: List[str], config: Config = None, device: Optional[str] = None) -> List[List[float]]:
         """Асинхронная версия embed_texts.
