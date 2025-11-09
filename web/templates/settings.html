@@ -4,8 +4,22 @@
     <meta charset="UTF-8">
     <title>Настройки</title>
     <link rel="stylesheet" href="/static/simple.min.css">
-    <!-- Подключаем Alpine.js -->
+    <!-- Подключаем Alpine.js с CDN и локальной резервной копией -->
     <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script>
+        // Резервная загрузка Alpine.js если CDN не доступен
+        window.addEventListener('DOMContentLoaded', function() {
+            setTimeout(function() {
+                if (typeof Alpine === 'undefined') {
+                    console.warn('Alpine.js не загрузился с CDN, загружаем локально');
+                    var script = document.createElement('script');
+                    script.src = '/static/alpine.min.js';
+                    script.defer = true;
+                    document.head.appendChild(script);
+                }
+            }, 1000);
+        });
+    </script>
     <style>
         .status-msg { padding: 1rem; margin-bottom: 1rem; border-radius: 4px; }
         .success { background-color: #d4edda; color: #155724; }
