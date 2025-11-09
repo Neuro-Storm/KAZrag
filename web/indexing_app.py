@@ -345,12 +345,92 @@ async def stop_conversion():
         from core.converting.multi_format_converter import MultiFormatConverter
         converter = MultiFormatConverter()
         converter.stop_conversion()
-        
+
         logger.info("Конвертация остановлена по запросу пользователя")
         return {"status": "stopped", "message": "Конвертация остановлена"}
     except Exception as e:
         logger.error(f"Ошибка остановки конвертации: {e}")
         return {"status": "error", "message": f"Ошибка остановки: {str(e)}"}
+
+
+@app.get("/indexing-progress")
+async def get_indexing_progress():
+    """Возвращает статус прогресса индексации."""
+    try:
+        from core.indexing.indexing_tracker import IndexingTracker
+        tracker = IndexingTracker()
+        progress_data = tracker.get_session_progress()
+
+        # Добавляем список всех файлов из директории индексации, если нет активной сессии
+        if progress_data.get("status") == "no_session":
+            config = config_manager.get()
+            indexing_folder = Path(config.folder_path)
+
+            if indexing_folder.exists():
+                all_files = []
+                for ext in ['.txt', '.md']:
+                    all_files.extend(indexing_folder.rglob(f"*{ext}"))
+                    all_files.extend(indexing_folder.rglob(f"*{ext.upper()}"))
+
+                files_dict = {}
+                for file_path in all_files:
+                    if file_path.is_file():
+                        str_path = str(file_path.resolve())
+                        # Проверяем статус файла из всех сессий
+                        status = tracker.get_file_status_from_any_session(file_path)
+
+                        files_dict[str_path] = {
+                            "status": status,
+                            "updated_at": None,
+                            "error_message": None
+                        }
+
+                progress_data["files"] = files_dict
+                progress_data["total_files"] = len(files_dict)
+                progress_data["indexed_files"] = len([f for f in files_dict.values() if f["status"] == "indexed"])
+                progress_data["error_files"] = len([f for f in files_dict.values() if f["status"] == "error"])
+                progress_data["processed_files"] = len([f for f in files_dict.values() if f["status"] != "pending"])
+                progress_data["pending_files"] = len([f for f in files_dict.values() if f["status"] == "pending"])
+
+        # Никакого логирования для API endpoint (чтобы не засорять логи)
+
+        return progress_data
+    except Exception as e:
+        logger.error(f"Ошибка получения прогресса индексации: {e}")
+        return {
+            "status": "error",
+            "message": f"Ошибка получения прогресса: {str(e)}"
+        }
+
+
+@app.post("/stop-indexing")
+async def stop_indexing():
+    """Останавливает процесс индексации."""
+    try:
+        from core.indexing.indexing_tracker import IndexingTracker
+        tracker = IndexingTracker()
+        tracker.stop_indexing()
+
+        logger.info("Индексация остановлена по запросу пользователя")
+        return {"status": "stopped", "message": "Индексация остановлена"}
+    except Exception as e:
+        logger.error(f"Ошибка остановки индексации: {e}")
+        return {"status": "error", "message": f"Ошибка остановки: {str(e)}"}
+
+
+@app.post("/reset-indexing-tracking")
+async def reset_indexing_tracking():
+    """Сбрасывает все данные отслеживания индексации."""
+    try:
+        from core.indexing.indexing_tracker import IndexingTracker
+        tracker = IndexingTracker()
+        tracker.reset_all()
+
+        logger.info("Данные отслеживания индексации сброшены")
+        return {"status": "reset", "message": "Данные отслеживания сброшены"}
+    except Exception as e:
+        logger.error(f"Ошибка сброса данных отслеживания: {e}")
+        return {"status": "error", "message": f"Ошибка сброса: {str(e)}"}
 
 
 @app.post("/delete-collection", response_class=JSONResponse)

@@ -148,7 +148,7 @@ class IndexingForm(BaseModel):
     sentence_overlap: int = Form(default=1, ge=0)
     use_multilevel_chunking: bool = Form(default=False)
     batch_size: int = Form(default=50, ge=1)
-    force_recreate: bool = Form(default=True)
+    force_recreate: bool = Form(default=False)
     memory_threshold: int = Form(default=500 * 1024 * 1024, ge=1)
     sparse_embedding: Optional[str] = Form(default="Qdrant/bm25")
 

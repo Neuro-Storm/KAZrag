@@ -49,7 +49,7 @@ class IndexingParams(BaseModel):
     # Настройки производительности
     embedding_batch_size: int = Field(default=32, ge=1, le=128, description="Размер батча для эмбеддингов")
     indexing_batch_size: int = Field(default=50, ge=1, le=500, description="Размер батча для индексации")
-    force_recreate: bool = Field(default=True, description="Пересоздавать коллекцию")
+    force_recreate: bool = Field(default=False, description="Пересоздавать коллекцию")
     memory_threshold: int = Field(default=500 * 1024 * 1024, ge=1024 * 1024, description="Порог памяти в байтах")
     
     # Дополнительные настройки

@@ -92,8 +92,39 @@
             
             <div>
                 <h3>Индексация документов</h3>
+                <p><strong>Директория индексации:</strong> {{ config.folder_path }}</p>
                 <button id="run-indexing-btn" onclick="runIndexing()">Запустить индексацию</button>
+                <button id="stop-indexing-btn" onclick="stopIndexing()" style="margin-left: 10px; background-color: #dc3545; color: white;">Остановить индексацию</button>
+                <button id="refresh-indexing-progress-btn" onclick="getIndexingProgress()" style="margin-left: 10px;">Обновить прогресс</button>
                 <div id="indexing-status" style="margin-top: 1rem;"></div>
+
+                <div id="indexing-progress" style="margin-top: 1rem; padding: 1rem; border: 1px solid #ddd; background-color: #f9f9f9;">
+                    <h4>Прогресс индексации</h4>
+                    <div id="indexing-progress-summary">
+                        <p>Загружается прогресс...</p>
+                    </div>
+                    <div style="margin: 0.5rem 0; display: flex; gap: 10px; align-items: center;">
+                        <label for="indexing-file-status-filter">Фильтр: </label>
+                        <select id="indexing-file-status-filter" onchange="filterAndDisplayIndexingFiles()" style="padding: 0.25rem;">
+                            <option value="">Все файлы</option>
+                            <option value="indexed">Проиндексировано</option>
+                            <option value="error">Ошибки</option>
+                            <option value="loading">Загрузка</option>
+                            <option value="chunking">Разделение</option>
+                            <option value="chunked">Разбито на чанки</option>
+                            <option value="indexing">Индексация</option>
+                            <option value="multilevel_indexing">Многоуровневая индексация</option>
+                            <option value="processing">В процессе</option>
+                            <option value="pending">Ожидает</option>
+                        </select>
+                        <label for="indexing-files-display-limit">Показывать: </label>
+                        <input type="number" id="indexing-files-display-limit" value="50" min="1" max="500" style="width: 70px; padding: 0.25rem;" onchange="filterAndDisplayIndexingFiles()" title="Количество файлов для отображения">
+                        <span>файлов</span>
+                    </div>
+                    <div id="indexing-file-list" style="margin-top: 1rem; max-height: 300px; overflow-y: auto;">
+                        <!-- Список файлов будет загружен здесь -->
+                    </div>
+                </div>
             </div>
             
             <hr style="margin: 1rem 0;">
@@ -153,11 +184,11 @@
         async function runIndexing() {
             const button = document.getElementById('run-indexing-btn');
             const statusDiv = document.getElementById('indexing-status');
-            
+
             button.disabled = true;
             button.textContent = 'Запуск...';
             statusDiv.textContent = 'Отправка запроса на индексацию...';
-            
+
             try {
                 const response = await fetch('/api/indexing/run-indexing', {
                     method: 'POST',
@@ -165,11 +196,13 @@
                         'Content-Type': 'application/json',
                     }
                 });
-                
+
                 const data = await response.json();
-                
+
                 if (data.status === 'indexing_started') {
                     statusDiv.innerHTML = '<span style="color: green;">✓</span> ' + data.message;
+                    // Начинаем отслеживать прогресс после запуска с небольшой задержкой
+                    setTimeout(() => getIndexingProgress(), 2000);
                 } else {
                     statusDiv.innerHTML = '<span style="color: red;">✗ Ошибка:</span> ' + data.message;
                 }
@@ -180,7 +213,292 @@
                 button.textContent = 'Запустить индексацию';
             }
         }
-        
+
+        async function stopIndexing() {
+            const button = document.getElementById('stop-indexing-btn');
+            const statusDiv = document.getElementById('indexing-status');
+
+            button.disabled = true;
+            button.textContent = 'Остановка...';
+            statusDiv.textContent = 'Отправка запроса на остановку индексации...';
+
+            try {
+                const response = await fetch('/api/indexing/stop-indexing', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.status === 'stopped') {
+                    statusDiv.innerHTML = '<span style="color: green;">✓</span> ' + data.message;
+                    // Обновляем прогресс после остановки
+                    setTimeout(() => getIndexingProgress(), 1000);
+                } else {
+                    statusDiv.innerHTML = '<span style="color: red;">✗ Ошибка:</span> ' + data.message;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = '<span style="color: red;">✗ Ошибка подключения:</span> ' + error.message;
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Остановить индексацию';
+            }
+        }
+
+        async function getIndexingProgress() {
+            const progressDiv = document.getElementById('indexing-progress-summary');
+            const fileListDiv = document.getElementById('indexing-file-list');
+            const button = document.getElementById('refresh-indexing-progress-btn');
+
+            button.disabled = true;
+            button.textContent = 'Загрузка...';
+
+            try {
+                const response = await fetch('/api/indexing/indexing-progress?t=' + Date.now(), {
+                    method: 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+
+                // Store the data globally so we can filter it
+                window.indexingData = await response.json();
+                const data = window.indexingData;
+
+                if (data.status === 'error') {
+                    progressDiv.innerHTML = '<span style="color: red;">Ошибка: ' + data.message + '</span>';
+                    fileListDiv.innerHTML = '';
+                    return;
+                }
+
+                // Обновляем сводку прогресса
+                let sessionInfo = '';
+                let currentFileInfo = '';
+                let collectionInfo = '';
+                if (data.session_id) {
+                    const statusText = {
+                        'running': 'Выполняется',
+                        'completed': 'Завершено',
+                        'stopped': 'Остановлено',
+                        'error': 'Ошибка',
+                        'no_session': 'Нет активной сессии'
+                    };
+                    sessionInfo = `<p><strong>Сессия:</strong> ${data.session_id} | <strong>Статус:</strong> ${statusText[data.status] || data.status}</p>`;
+
+                    // Добавляем информацию о коллекции
+                    if (data.collection_name) {
+                        collectionInfo = `<p><strong>Коллекция:</strong> ${data.collection_name}</p>`;
+                    }
+
+                    // Добавляем информацию о текущем файле и этапе
+                    if (data.current_file && data.status === 'running') {
+                        const stageText = {
+                            'loading': '📂 Загрузка',
+                            'chunking': '✂️ Разделение на чанки',
+                            'chunked': '🧩 Готово к индексации',
+                            'indexing': '📝 Индексация в Qdrant',
+                            'multilevel_indexing': '🔗 Многоуровневая индексация'
+                        };
+                        const stageEmoji = stageText[data.current_stage] || '⏳';
+                        currentFileInfo = `<p style="color: #007bff; font-weight: bold;"><strong>Текущий файл:</strong> ${stageEmoji} ${data.current_file}</p>`;
+                    }
+                }
+
+                progressDiv.innerHTML = `
+                    ${sessionInfo}
+                    ${collectionInfo}
+                    ${currentFileInfo}
+                    <p><strong>Всего файлов:</strong> ${data.total_files}</p>
+                    <p><strong>Проиндексировано:</strong> ${data.indexed_files} | <strong>Ошибки:</strong> ${data.error_files} | <strong>В процессе:</strong> ${data.processed_files - data.indexed_files - data.error_files} | <strong>Ожидает:</strong> ${data.pending_files}</p>
+                    <div style="height: 20px; background-color: #eee; border-radius: 10px; overflow: hidden;">
+                        <div style="height: 100%; width: ${data.total_files > 0 ? (data.indexed_files / data.total_files * 100) : 0}%; background-color: #28a745; float: left;"></div>
+                        <div style="height: 100%; width: ${data.total_files > 0 ? (data.error_files / data.total_files * 100) : 0}%; background-color: #dc3545; float: left;"></div>
+                        <div style="height: 100%; width: ${data.total_files > 0 ? ((data.processed_files - data.indexed_files - data.error_files) / data.total_files * 100) : 0}%; background-color: #ffc107; float: left;"></div>
+                    </div>
+                `;
+
+                // Теперь применяем фильтрацию и отображение
+                filterAndDisplayIndexingFiles();
+            } catch (error) {
+                console.error('Error loading indexing progress:', error);
+                progressDiv.innerHTML = '<span style="color: red;">Ошибка загрузки прогресса: ' + error.message + '</span>';
+                fileListDiv.innerHTML = '<p style="color: red;">Не удалось загрузить список файлов</p>';
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Обновить прогресс';
+            }
+        }
+
+        // Function to filter and display indexing files based on current filter settings
+        function filterAndDisplayIndexingFiles() {
+            const fileListDiv = document.getElementById('indexing-file-list');
+            const statusFilter = document.getElementById('indexing-file-status-filter').value;
+            const displayLimit = parseInt(document.getElementById('indexing-files-display-limit').value) || 50;
+
+            // We need to make sure we have the indexingData variable defined
+            if (window.indexingData && window.indexingData.files && Object.keys(window.indexingData.files).length > 0) {
+                fileListDiv.innerHTML = '<h5>Файлы:</h5><ul style="list-style-type: none; padding: 0;">';
+
+                let filteredFiles = Object.entries(window.indexingData.files);
+
+                // Apply status filter if specified
+                if (statusFilter && statusFilter !== '') {
+                    filteredFiles = filteredFiles.filter(([filePath, fileInfo]) => {
+                        return fileInfo && fileInfo.status === statusFilter;
+                    });
+                }
+
+                // Apply display limit
+                if (displayLimit > 0) {
+                    filteredFiles = filteredFiles.slice(0, displayLimit);
+                }
+
+                for (const [filePath, fileInfo] of filteredFiles) {
+                    // Skip if fileInfo is undefined or null
+                    if (!fileInfo) {
+                        continue;
+                    }
+
+                    let statusClass = '';
+                    let statusIcon = '';
+                    const status = fileInfo.status || 'unknown';
+
+                    if (status === 'indexed') {
+                        statusClass = 'style="color: green;"';
+                        statusIcon = '✓ ';
+                    } else if (status === 'error') {
+                        statusClass = 'style="color: red;"';
+                        statusIcon = '✗ ';
+                    } else if (status === 'loading') {
+                        statusClass = 'style="color: blue;"';
+                        statusIcon = '📂 ';
+                    } else if (status === 'chunking') {
+                        statusClass = 'style="color: purple;"';
+                        statusIcon = '✂️ ';
+                    } else if (status === 'chunked') {
+                        statusClass = 'style="color: cyan;"';
+                        statusIcon = '🧩 ';
+                    } else if (status === 'indexing') {
+                        statusClass = 'style="color: orange;"';
+                        statusIcon = '📝 ';
+                    } else if (status === 'multilevel_indexing') {
+                        statusClass = 'style="color: darkorange;"';
+                        statusIcon = '🔗 ';
+                    } else if (status === 'processing') {
+                        statusClass = 'style="color: orange;"';
+                        statusIcon = '⏳ ';
+                    } else if (status === 'pending') {
+                        statusClass = 'style="color: gray;"';
+                        statusIcon = '○ ';
+                    } else {
+                        statusClass = 'style="color: gray;"';
+                        statusIcon = '○ ';
+                    }
+
+                    const fileName = filePath.split('\\\\').pop().split('/').pop();
+                    let errorMsg = '';
+                    if (fileInfo.error_message) {
+                        errorMsg = `<br><small style="color: red;">Ошибка: ${fileInfo.error_message}</small>`;
+                    }
+
+                    fileListDiv.innerHTML += `<li ${statusClass}>${statusIcon}${fileName} (${status})${errorMsg}</li>`;
+                }
+
+                if (filteredFiles.length === 0) {
+                    fileListDiv.innerHTML += '<li>Нет файлов для отображения с выбранным фильтром</li>';
+                }
+
+                fileListDiv.innerHTML += '</ul>';
+            } else {
+                // No files data available or no active session
+                if (!window.indexingData) {
+                    fileListDiv.innerHTML = '<p>Данные о прогрессе недоступны</p>';
+                } else if (!window.indexingData.files || Object.keys(window.indexingData.files).length === 0) {
+                    if (window.indexingData.session_id) {
+                        fileListDiv.innerHTML = `<p>Нет файлов в текущей сессии (${window.indexingData.session_id})</p>`;
+                    } else {
+                        fileListDiv.innerHTML = '<p>Нет активной сессии индексации</p>';
+                    }
+                } else {
+                    // Display files from no_session state (files from directory)
+                    fileListDiv.innerHTML = '<h5>Файлы в директории индексации:</h5><ul style="list-style-type: none; padding: 0;">';
+
+                    let filteredFiles = Object.entries(window.indexingData.files);
+
+                    // Apply status filter if specified
+                    if (statusFilter && statusFilter !== '') {
+                        filteredFiles = filteredFiles.filter(([filePath, fileInfo]) => {
+                            return fileInfo && fileInfo.status === statusFilter;
+                        });
+                    }
+
+                    // Apply display limit
+                    if (displayLimit > 0) {
+                        filteredFiles = filteredFiles.slice(0, displayLimit);
+                    }
+
+                    for (const [filePath, fileInfo] of filteredFiles) {
+                        // Skip if fileInfo is undefined or null
+                        if (!fileInfo) {
+                            continue;
+                        }
+
+                        let statusClass = '';
+                        let statusIcon = '';
+                        const status = fileInfo.status || 'unknown';
+
+                        if (status === 'indexed') {
+                            statusClass = 'style="color: green;"';
+                            statusIcon = '✓ ';
+                        } else if (status === 'error') {
+                            statusClass = 'style="color: red;"';
+                            statusIcon = '✗ ';
+                        } else if (status === 'loading') {
+                            statusClass = 'style="color: blue;"';
+                            statusIcon = '📂 ';
+                        } else if (status === 'chunking') {
+                            statusClass = 'style="color: purple;"';
+                            statusIcon = '✂️ ';
+                        } else if (status === 'chunked') {
+                            statusClass = 'style="color: cyan;"';
+                            statusIcon = '🧩 ';
+                        } else if (status === 'indexing') {
+                            statusClass = 'style="color: orange;"';
+                            statusIcon = '📝 ';
+                        } else if (status === 'multilevel_indexing') {
+                            statusClass = 'style="color: darkorange;"';
+                            statusIcon = '🔗 ';
+                        } else if (status === 'processing') {
+                            statusClass = 'style="color: orange;"';
+                            statusIcon = '⏳ ';
+                        } else if (status === 'pending') {
+                            statusClass = 'style="color: gray;"';
+                            statusIcon = '○ ';
+                        } else {
+                            statusClass = 'style="color: gray;"';
+                            statusIcon = '○ ';
+                        }
+
+                        const fileName = filePath.split('\\\\').pop().split('/').pop();
+                        let errorMsg = '';
+                        if (fileInfo.error_message) {
+                            errorMsg = `<br><small style="color: red;">Ошибка: ${fileInfo.error_message}</small>`;
+                        }
+
+                        fileListDiv.innerHTML += `<li ${statusClass}>${statusIcon}${fileName} (${status})${errorMsg}</li>`;
+                    }
+
+                    if (filteredFiles.length === 0) {
+                        fileListDiv.innerHTML += '<li>Нет файлов для отображения с выбранным фильтром</li>';
+                    }
+
+                    fileListDiv.innerHTML += '</ul>';
+                }
+            }
+        }
+
         async function processFiles() {
             const button = document.getElementById('process-files-btn');
             const statusDiv = document.getElementById('conversion-status');
@@ -410,8 +728,29 @@
         // Загружаем прогресс при загрузке страницы
         document.addEventListener('DOMContentLoaded', function() {
             getConversionProgress();
-            // Обновляем прогресс каждые 30 секунд
-            setInterval(getConversionProgress, 30000);
+            getIndexingProgress(); // Загружаем прогресс индексации
+            // Обновляем прогресс каждые 5 секунд для более частого обновления
+            setInterval(getConversionProgress, 5000);
+            // Умное обновление прогресса - значительно реже запросы
+            let lastIndexingStatus = null;
+            setInterval(() => {
+                getIndexingProgress().then(data => {
+                    if (data) {
+                        // Если статус индексации изменился, обновляем чаще
+                        if (data.status !== lastIndexingStatus) {
+                            lastIndexingStatus = data.status;
+                            if (data.status === 'running') {
+                                // В начале индексации обновляем через 2 секунды
+                                setTimeout(getIndexingProgress, 2000);
+                            }
+                        }
+                        // Во время активной индексации обновляем каждые 10 секунд
+                        if (data.status === 'running') {
+                            setTimeout(getIndexingProgress, 10000);
+                        }
+                    }
+                });
+            }, 15000); // Базовый интервал - каждые 15 секунд (значительно реже)
         });
         
         async function deleteCollection(collectionName) {

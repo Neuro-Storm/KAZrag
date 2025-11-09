@@ -65,12 +65,22 @@ if __name__ == "__main__":
     logger.info("Обработчики событий зарегистрированы через lifespan")
     # Запуск сервера
     try:
-        logger.info("Запуск сервера на http://127.0.0.1:8000")
+        # Получаем IP адрес для доступа из локальной сети
+        host = os.getenv("KAZRAG_HOST", "0.0.0.0")  # 0.0.0.0 - доступ из локальной сети
+        port = int(os.getenv("KAZRAG_PORT", "8000"))
+
+        if host == "0.0.0.0":
+            logger.info(f"Запуск сервера на всех интерфейсах (доступ из локальной сети) на порту {port}")
+            logger.info("Локальный доступ: http://127.0.0.1:8000")
+            logger.info("Доступ из сети: http://[ваш-IP-адрес]:8000")
+        else:
+            logger.info(f"Запуск сервера на http://{host}:{port}")
+
         # Exclude common log file patterns and logs directory from reload watcher
         uvicorn.run(
             "main:app",
-            host="127.0.0.1",
-            port=8000,
+            host=host,
+            port=port,
             reload=True,
             reload_excludes=["*.log", "logs/*", "logs/*", "logs/*", "*.log.*", "*.log~", "file_tracking.json"],
             reload_dirs=["."]

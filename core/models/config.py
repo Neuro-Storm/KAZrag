@@ -175,7 +175,7 @@ class IndexingConfig(BaseModel):
     
     # Настройки производительности
     batch_size: int = Field(default=50, ge=1, description="Размер батча для индексации")
-    force_recreate: bool = Field(default=True, description="Пересоздавать коллекцию")
+    force_recreate: bool = Field(default=False, description="Пересоздавать коллекцию")
     memory_threshold: int = Field(default=500 * 1024 * 1024, ge=1, description="Порог памяти в байтах")
     
     # Дополнительные настройки

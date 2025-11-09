@@ -39,6 +39,7 @@ class DoclingConverter:
         """Инициализация конвертера."""
         self.config_manager = ConfigManager.get_instance()
         self.config = self.config_manager.get()
+        self._temp_files_to_delete = []  # Список временных файлов для удаления
         self._setup_model_paths()
         self._initialize_converter()
 
@@ -90,6 +91,26 @@ class DoclingConverter:
             # Default to Russian if unexpected type
             return ["ru"]
 
+    def _cleanup_temp_files(self):
+        """Очистка временных файлов, которые не удалось удалить ранее."""
+        if self._temp_files_to_delete:
+            import time
+            for temp_file_path in self._temp_files_to_delete[:]:
+                if temp_file_path.exists():
+                    try:
+                        temp_file_path.unlink()
+                        self._temp_files_to_delete.remove(temp_file_path)
+                        logger.info(f"Удален временный файл: {temp_file_path}")
+                    except Exception as e:
+                        logger.debug(f"Не удалось удалить временный файл {temp_file_path}: {e}")
+
+    def __del__(self):
+        """Деструктор - очистка временных файлов."""
+        try:
+            self._cleanup_temp_files()
+        except:
+            pass
+
     def _initialize_converter(self):
         """Инициализация конвертера Docling с настройками из конфигурации."""
         config = self.config_manager.get()
@@ -112,16 +133,22 @@ class DoclingConverter:
             # Granite uses VlmPipeline with TRANSFORMERS (for CPU/GPU)
             # Ensure lang is always a list for EasyOcrOptions
             ocr_lang_list = self._ensure_ocr_lang_list(config.docling_ocr_lang)
-            
+
+            # Force OCR on entire PDF document (including pages with embedded text)
+            do_ocr = config.docling_use_ocr
+            if hasattr(config, 'force_full_ocr') and config.force_full_ocr:
+                do_ocr = True
+                logger.info("Force OCR enabled for entire PDF document (including embedded text)")
+
             vlm_options = VlmPipelineOptions(
                 vlm_options=granite_vision_vlm_conversion_options,  # Правильная константа для CPU/GPU
                 accelerator_options=accelerator,
                 table_structure_options=TableStructureOptions(
                     table_former_mode=TABLE_FORMER_MODE,
                     ocr_options=EasyOcrOptions(lang=ocr_lang_list),
-                ) if config.docling_use_ocr else None,
+                ) if do_ocr else None,
                 local_files_only=(os.environ.get("TRANSFORMERS_OFFLINE") == "1"),
-                enable_ocr=config.docling_use_ocr,
+                enable_ocr=do_ocr,
                 enable_tables=config.docling_use_tables,
                 enable_formulas=config.docling_use_formulas,
             )
@@ -138,22 +165,22 @@ class DoclingConverter:
             kwargs = {
                 "accelerator_options": accelerator,
             }
-            
+
             if config.docling_use_ocr:
                 # Ensure lang is always a list for EasyOcrOptions
                 ocr_lang_list = self._ensure_ocr_lang_list(config.docling_ocr_lang)
                 kwargs["ocr_options"] = EasyOcrOptions(lang=ocr_lang_list)
-            
+
             # Force OCR on entire PDF document (including pages with embedded text)
             if hasattr(config, 'force_full_ocr') and config.force_full_ocr:
                 kwargs["do_ocr"] = True
                 # This ensures OCR is performed even on pages that already have text
-            
+
             if config.docling_use_tables:
                 kwargs["table_structure_options"] = TableStructureOptions(
                     table_former_mode=TABLE_FORMER_MODE,
                 )
-            
+
             pdf_opts = PdfPipelineOptions(**kwargs)
             format_opts = {InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_opts)}
             self.converter = DocumentConverter(format_options=format_opts)
@@ -210,9 +237,25 @@ class DoclingConverter:
                 # Удаляем временный файл, если он был создан
                 if temp_file_path and temp_file_path.exists():
                     try:
-                        temp_file_path.unlink()
+                        # Даем файлу время на освобождение
+                        import time
+                        for _ in range(5):  # Пытаемся удалить до 5 раз с интервалом
+                            try:
+                                temp_file_path.unlink()
+                                break
+                            except (PermissionError, OSError) as e:
+                                if _ == 4:  # Последняя попытка
+                                    logger.warning(f"Не удалось удалить временный файл {temp_file_path} после 5 попыток: {e}")
+                                    # Запоминаем файл для удаления позже
+                                    self._temp_files_to_delete.append(temp_file_path)
+                                else:
+                                    time.sleep(1)  # Ждем 1 секунду перед следующей попыткой
                     except Exception as e:
                         logger.warning(f"Не удалось удалить временный файл {temp_file_path}: {e}")
+                        self._temp_files_to_delete.append(temp_file_path)
+
+                # Пытаемся очистить временные файлы после каждого конвертированного файла
+                self._cleanup_temp_files()
             
             # Формирование пути для выходного файла (используем оригинальное имя файла)
             output_path = output_dir / f"{file_path.stem}.md"
