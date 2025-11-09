@@ -111,5 +111,16 @@ def create_app() -> FastAPI:
     async def indexing_redirect():
         """Indexing route - redirects to indexing page"""
         return RedirectResponse(url="/api/indexing/")
-    
+
+    # Add favicon route
+    @app.get("/favicon.ico")
+    async def favicon():
+        """Serve favicon.ico"""
+        from fastapi.responses import FileResponse
+        favicon_path = resource_path("web/static/favicon.ico")
+        if favicon_path.exists():
+            return FileResponse(favicon_path)
+        # Return empty response if favicon doesn't exist
+        return ""
+
     return app
