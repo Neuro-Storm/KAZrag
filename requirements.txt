@@ -12,4 +12,6 @@ sentence_transformers>=3.0.1
 loguru
 python-multipart
 docling
-#python -m pip install -r requirements.txt --target=python\Lib\site-packages --no-cache-dir --only-binary=:all:
+# Для установки в конкретную директорию (опционально):
+# Windows: python -m pip install -r requirements.txt --target=python\Lib\site-packages --no-cache-dir --only-binary=:all:
+# Linux/Mac: python -m pip install -r requirements.txt --target=./site-packages --no-cache-dir --only-binary=:all:

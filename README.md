@@ -23,9 +23,12 @@ cd KAZrag
 
 # Создайте виртуальное окружение
 python -m venv venv
-venv\Scripts\activate  # Windows
-# или
-source venv/bin/activate  # Linux/Mac
+
+# Активация виртуального окружения:
+# Windows:
+venv\Scripts\activate
+# Linux/Mac:
+source venv/bin/activate
 
 # Установите зависимости
 pip install -r requirements.txt
@@ -48,11 +51,13 @@ cp .env.example .env
 
 Скачайте и запустите Qdrant:
 ```bash
-# Windows
-qdrant.exe
+# Используйте Docker (рекомендуется для всех платформ):
+docker run -p 6333:6333 -p 6334:6334 -v ./qdrant_data:/qdrant/storage:z qdrant/qdrant
 
-# Или используйте Docker
-docker run -p 6333:6333 qdrant/qdrant
+# Или скачайте бинарный файл:
+# Windows: qdrant.exe
+# Linux: qdrant (из релизов на GitHub)
+# macOS: qdrant (из релизов на GitHub)
 ```
 
 ### 4. Запуск приложения

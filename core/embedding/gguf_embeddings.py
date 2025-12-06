@@ -71,22 +71,25 @@ class GGUFEmbeddings(Embeddings):
             # Проверяем, существует ли файл модели
             if not os.path.exists(model_path):
                 # Если файл не найден, пытаемся найти его в стандартных местах
+                # MODELS_DIR может быть установлена пользователем (кроссплатформенно)
                 models_dir = os.getenv("MODELS_DIR", "")
                 possible_paths = [
                     model_path,
-                    os.path.join("models", model_path),
-                    os.path.join("data", model_path),
-                    os.path.join("..", "models", model_path),
+                    Path("models") / model_path,
+                    Path("data") / model_path,
+                    Path("..") / "models" / model_path,
                 ]
                 
                 # Добавляем путь из переменной окружения MODELS_DIR, если она установлена
+                # Path() автоматически нормализует путь для текущей ОС
                 if models_dir:
-                    possible_paths.append(os.path.join(models_dir, model_path))
+                    possible_paths.append(Path(models_dir) / model_path)
                 
                 found = False
                 for path in possible_paths:
-                    if os.path.exists(path):
-                        model_path = path
+                    path_obj = Path(path) if not isinstance(path, Path) else path
+                    if path_obj.exists():
+                        model_path = str(path_obj)
                         found = True
                         break
                 

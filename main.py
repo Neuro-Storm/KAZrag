@@ -17,6 +17,8 @@ os.makedirs(models_dir / "easyocr", exist_ok=True)
 os.makedirs(models_dir / "fastembed", exist_ok=True)
 
 
+# Устанавливаем переменные окружения для кэша моделей
+# Path автоматически использует правильный разделитель пути для текущей ОС
 os.environ["HF_HOME"] = str(models_dir / "huggingface_cache")
 os.environ["FASTEMBED_CACHE_DIR"] = str(models_dir / "fastembed")
 os.environ["TOKENIZERS_PARALLELISM"] = "false"  # Стабильность

@@ -122,6 +122,14 @@ class DoclingConverter:
         cache_dir = config.huggingface_cache_path
         os.environ["HF_HOME"] = str(cache_dir)
 
+        # Проверка доступности OCR моделей в оффлайн режиме
+        use_ocr = config.docling_use_ocr
+        if use_ocr and getattr(config, 'use_local_only', True):
+            easyocr_model_dir = Path("./models/easyocr")
+            if not easyocr_model_dir.exists() or not any(easyocr_model_dir.iterdir()):
+                logger.warning("EasyOCR модели не найдены в ./models/easyocr, OCR отключен в оффлайн режиме")
+                use_ocr = False
+
         # Для Granite: путь к локальным моделям
         if backend == "granite":
             granite_dir = config.granite_models_dir

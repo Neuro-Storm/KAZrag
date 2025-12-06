@@ -72,7 +72,7 @@ class ModelManager:
         total_size = 0
         for dirpath, dirnames, filenames in os.walk(model_path):
             for f in filenames:
-                fp = os.path.join(dirpath, f)
-                total_size += os.path.getsize(fp)
+                fp = Path(dirpath) / f
+                total_size += fp.stat().st_size
         
         return total_size / (1024 * 1024)  # Размер в МБ

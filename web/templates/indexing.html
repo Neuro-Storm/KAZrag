@@ -397,7 +397,8 @@
                         statusIcon = '○ ';
                     }
 
-                    const fileName = filePath.split('\\\\').pop().split('/').pop();
+                    // Кроссплатформенное извлечение имени файла (поддержка Windows и Linux)
+                    const fileName = filePath.split(/[/\\]+/).pop();
                     let errorMsg = '';
                     if (fileInfo.error_message) {
                         errorMsg = `<br><small style="color: red;">Ошибка: ${fileInfo.error_message}</small>`;
@@ -481,7 +482,8 @@
                             statusIcon = '○ ';
                         }
 
-                        const fileName = filePath.split('\\\\').pop().split('/').pop();
+                        // Кроссплатформенное извлечение имени файла (поддержка Windows и Linux)
+                    const fileName = filePath.split(/[/\\]+/).pop();
                         let errorMsg = '';
                         if (fileInfo.error_message) {
                             errorMsg = `<br><small style="color: red;">Ошибка: ${fileInfo.error_message}</small>`;
@@ -616,7 +618,9 @@
                             statusIcon = '○ ';
                         }
                         
-                        fileListDiv.innerHTML += `<li ${statusClass}>${statusIcon}${filePath.split('\\').pop().split('/').pop()} (${fileInfo.status})</li>`;
+                        // Кроссплатформенное извлечение имени файла (поддержка Windows и Linux)
+                        const fileName = filePath.split(/[/\\]+/).pop();
+                        fileListDiv.innerHTML += `<li ${statusClass}>${statusIcon}${fileName} (${fileInfo.status})</li>`;
                     }
                     fileListDiv.innerHTML += '</ul>';
                 } else {
@@ -670,7 +674,9 @@
                         statusIcon = '○ ';
                     }
                     
-                    fileListDiv.innerHTML += `<li ${statusClass}>${statusIcon}${filePath.split('\\\\').pop().split('/').pop()} (${fileInfo.status})</li>`;
+                    // Кроссплатформенное извлечение имени файла (поддержка Windows и Linux)
+                    const fileName = filePath.split(/[/\\]+/).pop();
+                    fileListDiv.innerHTML += `<li ${statusClass}>${statusIcon}${fileName} (${fileInfo.status})</li>`;
                 }
                 
                 if (filteredFiles.length === 0) {

@@ -1,5 +1,5 @@
-import os
+from pathlib import Path
 
-log_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs', 'app.log')
-with open(log_path, 'w') as f:
-    f.write('')
+log_path = Path(__file__).parent.parent / 'logs' / 'app.log'
+log_path.parent.mkdir(parents=True, exist_ok=True)
+log_path.write_text('')
